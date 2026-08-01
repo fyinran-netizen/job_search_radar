@@ -1,0 +1,22 @@
+[project]
+name = "job-search-radar"
+version = "0.1.0"
+description = "Local job discovery, matching, and application tracking tool."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.2.0",
+    "pandas-stubs~=3.0.5",
+    "pydantic>=2.7.0",
+    "pyyaml>=6.0.0",
+    "streamlit>=1.36.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

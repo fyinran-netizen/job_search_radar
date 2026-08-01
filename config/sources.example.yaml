@@ -1,0 +1,21 @@
+sources:
+  - name: "Kedacom Driver Development Engineer 2026 Campus"
+    type: "job_detail"
+    enabled: true
+    priority: 1
+    official: true
+    company_name: "苏州科达科技股份有限公司"
+    company_type: "Technology"
+    url: "https://kedacom.zhiye.com/zpdetail/511158941"
+  - name: "Example Graduate Job Board"
+    type: "job_board"
+    enabled: false
+    priority: 2
+    official: false
+    url: "https://graduate-jobs.example.invalid"
+  - name: "Example SOE Recruitment Portal"
+    type: "company_career_site"
+    enabled: false
+    priority: 3
+    official: true
+    url: "https://recruit.example-soe.invalid"

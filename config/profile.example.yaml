@@ -1,0 +1,24 @@
+education: "Master's student or recent graduate"
+graduation_date: "2026-06"
+target_roles:
+  - "Data Analyst"
+  - "Business Analyst"
+  - "Software Engineer"
+  - "Graduate Program"
+skills:
+  - "Python"
+  - "SQL"
+  - "Pandas"
+  - "Data Analysis"
+  - "Machine Learning"
+preferred_company_types:
+  - "Bank"
+  - "State-owned Enterprise"
+  - "Technology"
+  - "Foreign Enterprise"
+preferred_locations:
+  - "Shanghai"
+  - "Beijing"
+  - "Shenzhen"
+  - "Sydney"
+  - "Remote"

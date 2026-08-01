@@ -1,0 +1,16 @@
+title_keywords:
+  - "Data Analyst"
+  - "Business Analyst"
+  - "Software Engineer"
+  - "Graduate Program"
+skill_keywords:
+  - "Python"
+  - "SQL"
+  - "Pandas"
+  - "Data Analysis"
+  - "Machine Learning"
+weights:
+  title: 35
+  skill: 30
+  company_type: 15
+  location: 20
