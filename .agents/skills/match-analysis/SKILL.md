@@ -1,4 +1,9 @@
-﻿# Match Analysis
+---
+name: match-analysis
+description: Compare a validated and normalized job record against a candidate profile and explain fit with structured JSON. Use when Codex needs to produce match score, strengths, gaps, missing requirements, recommendation, explanation, or confidence without mutating application state.
+---
+
+# Match Analysis
 
 ## Purpose
 

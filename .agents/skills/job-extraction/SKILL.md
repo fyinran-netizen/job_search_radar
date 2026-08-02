@@ -1,4 +1,9 @@
-﻿# Job Extraction
+---
+name: job-extraction
+description: Extract structured RawJobRecord JSON from collected job page content. Use when Codex needs to convert visible job page text, HTML, or PageContent into raw job records while preserving source URLs and avoiding normalization, deduplication, matching, ranking, or persistence.
+---
+
+# Job Extraction
 
 ## Purpose
 

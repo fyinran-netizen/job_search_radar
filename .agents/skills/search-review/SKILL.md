@@ -1,4 +1,9 @@
-﻿# Search Review
+---
+name: search-review
+description: Review bounded job search results and decide whether another search round is needed. Use when Codex needs a ContinueDecision-style JSON response based on current round, limits, source coverage, valid job count, duplicates, match quality, and prior queries without executing tools or mutating state.
+---
+
+# Search Review
 
 ## Purpose
 

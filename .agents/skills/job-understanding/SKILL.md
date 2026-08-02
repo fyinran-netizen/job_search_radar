@@ -1,4 +1,9 @@
-﻿# Job Understanding
+---
+name: job-understanding
+description: Analyze a validated job record to produce structured semantic understanding. Use when Codex needs to identify canonical role, campus eligibility, hard requirements, nice-to-have requirements, red flags, evidence, or confidence before downstream match analysis.
+---
+
+# Job Understanding
 
 ## Purpose
 

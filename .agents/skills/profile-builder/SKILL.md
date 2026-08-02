@@ -1,4 +1,9 @@
-﻿# Profile Builder
+---
+name: profile-builder
+description: Build a privacy-safe candidate profile from resume text, user notes, explicit preferences, or existing profile fields. Use when Codex needs to extract UserProfile-compatible JSON while excluding private contact details and deferring completeness checks or search query generation to other skills.
+---
+
+# Profile Builder
 
 ## Purpose
 

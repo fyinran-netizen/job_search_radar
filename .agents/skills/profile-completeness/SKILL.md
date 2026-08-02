@@ -1,4 +1,9 @@
-﻿# Profile Completeness
+---
+name: profile-completeness
+description: Decide whether a candidate profile has enough information for a useful job search. Use when Codex needs to produce ProfileCompletenessResult-compatible JSON with completeness status, missing fields, and concise user-facing questions without starting search or fabricating data.
+---
+
+# Profile Completeness
 
 ## Purpose
 

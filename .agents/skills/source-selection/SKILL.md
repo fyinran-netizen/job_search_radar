@@ -1,4 +1,9 @@
-﻿# Source Selection
+---
+name: source-selection
+description: Select candidate job URLs from raw search results without fetching pages. Use when Codex needs CandidateSource-compatible JSON objects for concrete job description pages, official career pages, or relevant third-party listings while avoiding generic, duplicate, unsafe, or login-only URLs.
+---
+
+# Source Selection
 
 ## Purpose
 

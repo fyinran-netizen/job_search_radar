@@ -1,4 +1,9 @@
-﻿# Search Strategy
+---
+name: search-strategy
+description: Generate a bounded job search strategy from a complete candidate profile. Use when Codex needs to create SearchPlan-compatible JSON with target roles, locations, company types, and keywords while respecting configured query counts, round limits, privacy rules, and previous queries.
+---
+
+# Search Strategy
 
 ## Purpose
 
