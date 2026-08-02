@@ -2,16 +2,16 @@
 
 from pathlib import Path
 
-from job_radar.agents.discovery import JobDiscoveryAgent
-from job_radar.agents.models import AgentRunResult
-from job_radar.collectors.agent import AgentDiscoveryCollector
-from job_radar.collectors.demo import DemoCollector
+from job_radar.agent.orchestrator import JobDiscoveryAgent
 from job_radar.config import load_candidate_sources, load_matching_rules, load_profile
 from job_radar.extractors.rule_based import RuleBasedJobExtractor
+from job_radar.models.decisions import AgentRunResult
+from job_radar.models.job import RawJobRecord
 from job_radar.models.profile import MatchingRules, UserProfile
 from job_radar.pipeline.runner import PipelineResult, PipelineRunner
 from job_radar.storage.repository import JobRepository
-from job_radar.tools.factory import create_manual_http_tool_scheduler, create_mock_tool_scheduler
+from job_radar.tools.factory import create_manual_http_tool_executor, create_mock_tool_executor
+from job_radar.tools.functions.demo_csv import DemoCsvTool
 from job_radar.utils.paths import CONFIG_DIR, DEFAULT_DB_PATH, DEMO_JOBS_PATH
 
 
@@ -29,12 +29,12 @@ class IngestionService:
         self.demo_csv_path = demo_csv_path
 
     def run_demo_pipeline(self) -> tuple[PipelineResult, list[str]]:
-        """Run the demo collector through the complete pipeline."""
+        """Run the demo CSV tool through the complete pipeline."""
 
         profile, rules, notices = self._load_profile_rules_and_notices()
 
         runner = PipelineRunner(
-            collector=DemoCollector(self.demo_csv_path),
+            collect_raw_records=DemoCsvTool(self.demo_csv_path).collect,
             repository=JobRepository(self.db_path),
             profile=profile,
             rules=rules,
@@ -49,17 +49,25 @@ class IngestionService:
 
         agent = JobDiscoveryAgent(
             job_extractor=RuleBasedJobExtractor(),
-            tool_scheduler=create_mock_tool_scheduler(),
+            tool_executor=create_mock_tool_executor(),
         )
-        collector = AgentDiscoveryCollector(agent=agent, profile=profile)
+        agent_result: AgentRunResult | None = None
+
+        def collect_raw_records() -> list[RawJobRecord]:
+            nonlocal agent_result
+            records, agent_result = agent.discover(profile)
+            return records
+
         runner = PipelineRunner(
-            collector=collector,
+            collect_raw_records=collect_raw_records,
             repository=JobRepository(self.db_path),
             profile=profile,
             rules=rules,
         )
         pipeline_result = runner.run()
-        return pipeline_result, notices, collector.last_agent_result
+        if agent_result is None:
+            raise RuntimeError("Agent did not produce a run result.")
+        return pipeline_result, notices, agent_result
 
     def run_manual_source_pipeline(self) -> tuple[PipelineResult, list[str], AgentRunResult]:
         """Run manually configured URLs through HTTP collection and extraction."""
@@ -72,17 +80,25 @@ class IngestionService:
 
         agent = JobDiscoveryAgent(
             job_extractor=RuleBasedJobExtractor(),
-            tool_scheduler=create_manual_http_tool_scheduler(sources),
+            tool_executor=create_manual_http_tool_executor(sources),
         )
-        collector = AgentDiscoveryCollector(agent=agent, profile=profile)
+        agent_result: AgentRunResult | None = None
+
+        def collect_raw_records() -> list[RawJobRecord]:
+            nonlocal agent_result
+            records, agent_result = agent.discover(profile)
+            return records
+
         runner = PipelineRunner(
-            collector=collector,
+            collect_raw_records=collect_raw_records,
             repository=JobRepository(self.db_path),
             profile=profile,
             rules=rules,
         )
         pipeline_result = runner.run()
-        return pipeline_result, notices, collector.last_agent_result
+        if agent_result is None:
+            raise RuntimeError("Agent did not produce a run result.")
+        return pipeline_result, notices, agent_result
 
     def _load_profile_rules_and_notices(self) -> tuple[UserProfile, MatchingRules, list[str]]:
         profile, profile_is_example, profile_path = load_profile(self.config_dir)

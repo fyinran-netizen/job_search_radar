@@ -1,27 +1,38 @@
 # Architecture
 
-Job Radar is organized as a local-first Python application. The current phase proves the core boundaries and end-to-end data flow without implementing broad web crawling.
+Job Radar is organized as a local-first Python application. The current phase proves the deterministic core of the larger job-search agent shown in `docs/job_search_agent_full_flow.svg`.
+
+The target direction is:
+
+```text
+Program controls the workflow.
+AI returns structured decisions.
+Tools execute bounded actions.
+Validation and persistence remain deterministic.
+```
+
+The current code should be viewed as the first working slice of that target system, not as the final agent.
 
 ## System Layers
 
 ```mermaid
 flowchart TD
-    Profile[UserProfile YAML] --> Check[ProfileCompletenessChecker]
-    Check --> Plan[SearchPlanBuilder]
-    Plan --> Scheduler[ToolScheduler]
-    Scheduler --> Search[Mock web_search]
+    Profile[UserProfile YAML] --> Check[ai/tasks ProfileCompletenessChecker]
+    Check --> Plan[ai/tasks SearchPlanBuilder]
+    Plan --> Executor[ToolExecutor]
+    Executor --> Search[tools/functions MockWebSearchTool]
     Search --> Sources[CandidateSource URLs]
-    Sources --> PageTool[Mock collect_page]
-    ManualSources[Configured manual URLs] --> ManualTool[ManualSourceTool]
-    ManualTool --> HttpPageTool[HttpPageCollectorTool]
+    Sources --> PageTool[tools/functions MockPageTool]
+    ManualSources[Configured manual URLs] --> ManualTool[tools/functions ManualSourceTool]
+    ManualTool --> HttpPageTool[tools/functions HttpPageTool]
     HttpPageTool --> Pages
     PageTool --> Pages[PageContent]
     Pages --> Extract[JobExtractor]
     Extract -. future .-> LLMExtract[LLMJobExtractor + LLMClient]
-    Extract --> AgentCollector[AgentDiscoveryCollector]
-    CSV[Demo CSV Data Source] --> Collector[DemoCollector]
-    Collector --> Raw[RawJobRecord]
-    AgentCollector --> Raw
+    Extract --> Agent[agent/orchestrator JobDiscoveryAgent]
+    CSV[Demo CSV Data Source] --> DemoTool[tools/functions DemoCsvTool]
+    DemoTool --> Raw[RawJobRecord]
+    Agent --> Raw
     Raw --> Validation[Validation]
     Validation --> Normalization[Normalization]
     Normalization --> Deduplication[Deduplication]
@@ -33,17 +44,67 @@ flowchart TD
     Streamlit --> JobService
 ```
 
+## Target Agent Blueprint
+
+The SVG in `docs/job_search_agent_full_flow.svg` is the long-term architecture reference. It separates the system into six phases:
+
+1. User input and file handling.
+2. User profile extraction and validation.
+3. Search strategy and tool planning.
+4. Tool execution and deterministic data processing.
+5. Job understanding, matching, and iterative search decisions.
+6. Persistence, Streamlit display, and user feedback.
+
+The key rule is that AI never jumps the workflow directly. AI should return structured JSON decisions, then the orchestrator validates those decisions and decides what code or tool to run.
+
+Examples:
+
+```text
+AI returns CandidateProfile
+-> Program validates schema
+-> Program merges accepted fields
+
+AI returns ToolPlan
+-> Program checks allowed tools, domains, budgets, and privacy rules
+-> ToolExecutor runs web_search or collect_page
+
+AI returns MatchAssessment
+-> Program validates score/reasons
+-> Repository persists the accepted result
+```
+
+## Current Implementation vs Target Blueprint
+
+| SVG phase | Target behavior | Current implementation |
+| --- | --- | --- |
+| User input and file handling | Upload resume, parse PDF/DOCX, accept free-form preferences. | Not implemented. Current profile comes from YAML. |
+| User profile extraction | AI extracts `CandidateProfile` from resume and text. | Not implemented. `UserProfile` is loaded from YAML. |
+| Profile completeness | AI decides whether missing information blocks search. | Deterministic `ProfileCompletenessChecker` checks required fields. |
+| Search strategy | AI generates role groups, queries, source priorities, stop conditions. | Deterministic `SearchPlanBuilder` creates simple keywords. |
+| Tool planning | AI returns a validated `ToolPlan`. | Not implemented. Current executor is called in fixed order. |
+| Search tools | `web_search`, company career search, API/MCP tools. | `MockWebSearchTool` and `ManualSourceTool`. |
+| Page collection | Fetch URL, browser/site adapter if needed, return `PageContent`. | `MockPageTool` and `HttpPageTool`. |
+| Job extraction | Prefer LLM extraction for varied pages, then validate. | `RuleBasedJobExtractor`; `LLMJobExtractor` boundary exists for later. |
+| Validation/normalization/dedup | Deterministic quality gate. | Implemented in `pipeline/`. |
+| Job understanding | AI identifies hard requirements, eligibility, risks. | Not implemented. |
+| Match analysis | AI/Rules calculate fit, gaps, recommendation, explanation. | Rule-based matcher only. |
+| Continue decision | AI decides whether to search another round within limits. | Not implemented. |
+| Persistence/UI/feedback | Save jobs, scores, run logs, user feedback. | SQLite jobs, status/notes, Streamlit table/export. |
+
+This means the next major architecture step is not adding many page-specific `if/else` branches. The next step is introducing an explicit orchestrator and structured AI decision models while keeping the current pipeline as the deterministic safety layer.
+
 ## Dependencies
 
 - `app.py` depends on services only.
-- Services depend on pipeline components, agent setup, tools, LLM abstractions, and repositories.
-- Agents depend on the extractor interface and tool scheduler.
+- Services depend on pipeline components, agent setup, tools, AI tasks/providers, and repositories.
+- The agent depends on AI tasks, extractor interface, and `ToolExecutor`.
+- Future orchestrator growth should stay inside `agent/` and depend on AI decision models, tools, and services; lower layers should not depend on the orchestrator.
 - Tools return structured models and do not write to storage.
 - Pipeline components depend on models and configuration, not Streamlit.
 - Storage owns SQL, database initialization, and inserted/updated/failed persistence counts.
-- Collectors return `RawJobRecord` objects and do not persist data.
+- Tools and extraction steps return structured models and do not persist data.
 
-This keeps UI, business logic, and storage separate enough for future collectors and matching improvements.
+This keeps UI, workflow control, tools, deterministic processing, and storage separate enough for future agent and matching improvements.
 
 ## Technology Choices
 
@@ -60,15 +121,14 @@ This keeps UI, business logic, and storage separate enough for future collectors
 
 ## Agent And Tool Layer
 
-The current agent implementation is a local skeleton for later AI skills. The mock path runs:
+The current agent implementation is a local skeleton for the SVG's agent/tool phases. The mock path runs:
 
 ```text
 ProfileCompletenessChecker
 -> SearchPlanBuilder
--> ToolScheduler web_search
--> ToolScheduler collect_page
+-> ToolExecutor web_search
+-> ToolExecutor collect_page
 -> RuleBasedJobExtractor
--> AgentDiscoveryCollector
 -> existing PipelineRunner
 ```
 
@@ -76,20 +136,36 @@ The manual URL path runs:
 
 ```text
 ManualSourceTool configured URLs
--> ToolScheduler collect_page
--> HttpPageCollectorTool
+-> ToolExecutor collect_page
+-> HttpPageTool
 -> RuleBasedJobExtractor
--> AgentDiscoveryCollector
 -> existing PipelineRunner
 ```
 
 This keeps deterministic code responsible for the steps that can already be tested locally. Future LLM extraction can be introduced by replacing `RuleBasedJobExtractor` with `LLMJobExtractor(real_client)` while the local pipeline remains the quality gate.
 
-## Adding Real Collectors Later
+The future agent flow should add these explicit decision boundaries:
 
-A real collector should implement the same collector boundary as `DemoCollector`: collect source data and return `RawJobRecord` objects. It should preserve `apply_url`, `source_url`, `source_name`, and `is_official` so downstream validation and persistence can keep source traceability.
+```text
+CandidateProfileDecision
+-> CompletenessDecision
+-> SearchStrategy
+-> ToolPlan
+-> RawSearchResult[]
+-> PageContent
+-> ExtractedJob[]
+-> JobUnderstanding
+-> MatchAssessment
+-> ContinueDecision
+```
 
-Future collectors can be added for company career sites, official campus recruitment pages, or imported CSV files. They should not write directly to SQLite and should not bypass validation.
+Each item should be a Pydantic model. AI may propose values, but code validates and applies them.
+
+## Adding Real Tools Later
+
+A real tool should implement the `BaseTool` boundary and return structured models such as `CandidateSource`, `PageContent`, or `RawJobRecord`. It should preserve `apply_url`, `source_url`, `source_name`, and `is_official` so downstream validation and persistence can keep source traceability.
+
+Future tools can be added for company career sites, official campus recruitment pages, or imported CSV files. They should not write directly to SQLite and should not bypass validation.
 
 ## Enhancing Matching
 

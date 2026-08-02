@@ -5,16 +5,24 @@ boundary so a future LLM implementation can replace deterministic extraction
 without changing the agent, pipeline, repository, or UI layers.
 """
 
-from job_radar.agents.models import PageContent
+from typing import Protocol
+
 from job_radar.extractors.base import JobExtractor
-from job_radar.llm.base import LLMClient
 from job_radar.models.job import RawJobRecord
+from job_radar.models.tool import PageContent
+
+
+class PageExtractionClient(Protocol):
+    """Client protocol for AI-backed page extraction tasks."""
+
+    def extract_jobs_from_page(self, page: PageContent) -> list[RawJobRecord]:
+        """Extract raw job records from collected page content."""
 
 
 class LLMJobExtractor(JobExtractor):
     """Use an LLM client to extract structured job records from page content."""
 
-    def __init__(self, llm_client: LLMClient) -> None:
+    def __init__(self, llm_client: PageExtractionClient) -> None:
         self.llm_client = llm_client
 
     def extract(self, page: PageContent) -> list[RawJobRecord]:

@@ -1,20 +1,20 @@
-"""Factories for tool scheduler setup."""
+"""Factories for tool executor setup."""
 
-from job_radar.agents.models import CandidateSource
-from job_radar.tools.base import ToolScheduler
-from job_radar.tools.http_page_collector import HttpPageCollectorTool
-from job_radar.tools.manual_sources import ManualSourceTool
-from job_radar.tools.mock_page_collector import MockPageCollectorTool
-from job_radar.tools.mock_web_search import MockWebSearchTool
-
-
-def create_mock_tool_scheduler() -> ToolScheduler:
-    """Create the local mock tool scheduler used in phase one."""
-
-    return ToolScheduler([MockWebSearchTool(), MockPageCollectorTool()])
+from job_radar.models.search import CandidateSource
+from job_radar.tools.executor import ToolExecutor
+from job_radar.tools.functions.http_page import HttpPageTool
+from job_radar.tools.functions.manual_sources import ManualSourceTool
+from job_radar.tools.functions.mock_page import MockPageTool
+from job_radar.tools.functions.mock_web_search import MockWebSearchTool
 
 
-def create_manual_http_tool_scheduler(sources: list[CandidateSource]) -> ToolScheduler:
-    """Create a scheduler that uses manual URLs and real HTTP page collection."""
+def create_mock_tool_executor() -> ToolExecutor:
+    """Create the local mock tool executor used in phase one."""
 
-    return ToolScheduler([ManualSourceTool(sources), HttpPageCollectorTool()])
+    return ToolExecutor([MockWebSearchTool(), MockPageTool()])
+
+
+def create_manual_http_tool_executor(sources: list[CandidateSource]) -> ToolExecutor:
+    """Create an executor that uses manual URLs and real HTTP page collection."""
+
+    return ToolExecutor([ManualSourceTool(sources), HttpPageTool()])

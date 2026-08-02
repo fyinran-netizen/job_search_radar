@@ -1,27 +1,28 @@
 import pytest
 
-from job_radar.agents.discovery import JobDiscoveryAgent
-from job_radar.agents.models import CandidateSource
-from job_radar.agents.profile import ProfileCompletenessChecker
-from job_radar.agents.search_plan import SearchPlanBuilder
-from job_radar.collectors.agent import AgentDiscoveryCollector
+from job_radar.agent.orchestrator import JobDiscoveryAgent
+from job_radar.ai.providers.mock import MockAIProvider
+from job_radar.ai.structured_output import validate_model
+from job_radar.ai.tasks.profile_completeness import ProfileCompletenessChecker
+from job_radar.ai.tasks.search_strategy import SearchPlanBuilder
 from job_radar.config import load_candidate_sources, load_matching_rules, load_profile
 from job_radar.extractors.llm import LLMJobExtractor, UnconfiguredLLMJobExtractor
 from job_radar.extractors.rule_based import RuleBasedJobExtractor
-from job_radar.llm.mock import MockLLMClient
+from job_radar.models.job import RawJobRecord
+from job_radar.models.search import CandidateSource
 from job_radar.models.profile import UserProfile
 from job_radar.pipeline.runner import PipelineRunner
 from job_radar.services.ingestion_service import IngestionService
 from job_radar.storage.repository import JobRepository
-from job_radar.tools.base import ToolScheduler
-from job_radar.tools.factory import create_mock_tool_scheduler
-from job_radar.tools.http_page_collector import HttpPageCollectorTool
-from job_radar.tools.manual_sources import ManualSourceTool
+from job_radar.tools.executor import ToolExecutor
+from job_radar.tools.factory import create_mock_tool_executor
+from job_radar.tools.functions.http_page import HttpPageTool
+from job_radar.tools.functions.manual_sources import ManualSourceTool
 from job_radar.utils.paths import CONFIG_DIR
 
 
 def make_agent() -> JobDiscoveryAgent:
-    return JobDiscoveryAgent(job_extractor=RuleBasedJobExtractor(), tool_scheduler=create_mock_tool_scheduler())
+    return JobDiscoveryAgent(job_extractor=RuleBasedJobExtractor(), tool_executor=create_mock_tool_executor())
 
 
 def test_profile_checker_reports_incomplete_profile() -> None:
@@ -42,7 +43,7 @@ def test_search_plan_builder_generates_keywords() -> None:
     assert "Bank graduate program" in plan.keywords
 
 
-def test_agent_tool_scheduler_runs_mock_search_and_collection() -> None:
+def test_agent_tool_executor_runs_mock_search_and_collection() -> None:
     profile, _, _ = load_profile(CONFIG_DIR)
     agent = make_agent()
 
@@ -61,12 +62,19 @@ def test_agent_tool_scheduler_runs_mock_search_and_collection() -> None:
     assert records[0].source_name == "Future Bank Careers"
 
 
-def test_agent_discovery_collector_feeds_existing_pipeline(temp_db_path) -> None:
+def test_agent_orchestrator_feeds_existing_pipeline(temp_db_path) -> None:
     profile, _, _ = load_profile(CONFIG_DIR)
     rules, _, _ = load_matching_rules(CONFIG_DIR)
-    collector = AgentDiscoveryCollector(agent=make_agent(), profile=profile)
+    agent = make_agent()
+    agent_result = None
+
+    def collect_raw_records() -> list[RawJobRecord]:
+        nonlocal agent_result
+        records, agent_result = agent.discover(profile)
+        return records
+
     runner = PipelineRunner(
-        collector=collector,
+        collect_raw_records=collect_raw_records,
         repository=JobRepository(temp_db_path),
         profile=profile,
         rules=rules,
@@ -78,7 +86,8 @@ def test_agent_discovery_collector_feeds_existing_pipeline(temp_db_path) -> None
     assert result.valid_count == 3
     assert result.invalid_count == 0
     assert result.inserted_count == 3
-    assert collector.last_agent_result.extracted_count == 3
+    assert agent_result is not None
+    assert agent_result.extracted_count == 3
 
 
 def test_ingestion_service_runs_mock_agent_pipeline(temp_db_path) -> None:
@@ -100,7 +109,7 @@ def test_load_candidate_sources_reads_enabled_manual_source() -> None:
     assert sources[0].company_name == "苏州科达科技股份有限公司"
 
 
-def test_http_page_collector_reads_local_html(temp_db_path) -> None:
+def test_http_page_tool_reads_local_html(temp_db_path) -> None:
     html_path = temp_db_path.parent / "kedacom.html"
     html_path.write_text(
         """
@@ -129,7 +138,7 @@ def test_http_page_collector_reads_local_html(temp_db_path) -> None:
         relevance_score=100,
     )
 
-    page = HttpPageCollectorTool().run(source)
+    page = HttpPageTool().run(source)
 
     assert page.title == "驱动开发工程师（2026校园招聘）"
     assert "工作职责" in page.text
@@ -167,7 +176,7 @@ def test_rule_based_extractor_structures_job_detail_page(temp_db_path) -> None:
         is_official=True,
         relevance_score=100,
     )
-    page = HttpPageCollectorTool().run(source)
+    page = HttpPageTool().run(source)
 
     record = RuleBasedJobExtractor().extract(page)[0]
 
@@ -206,15 +215,22 @@ def test_manual_source_tool_pipeline_with_local_html(temp_db_path) -> None:
         is_official=True,
         relevance_score=100,
     )
-    scheduler = ToolScheduler([ManualSourceTool([source]), HttpPageCollectorTool()])
+    executor = ToolExecutor([ManualSourceTool([source]), HttpPageTool()])
     profile, _, _ = load_profile(CONFIG_DIR)
     rules, _, _ = load_matching_rules(CONFIG_DIR)
-    collector = AgentDiscoveryCollector(
-        agent=JobDiscoveryAgent(job_extractor=RuleBasedJobExtractor(), tool_scheduler=scheduler),
-        profile=profile,
+    agent = JobDiscoveryAgent(
+        job_extractor=RuleBasedJobExtractor(),
+        tool_executor=executor,
     )
+    agent_result = None
+
+    def collect_raw_records() -> list[RawJobRecord]:
+        nonlocal agent_result
+        records, agent_result = agent.discover(profile)
+        return records
+
     runner = PipelineRunner(
-        collector=collector,
+        collect_raw_records=collect_raw_records,
         repository=JobRepository(temp_db_path),
         profile=profile,
         rules=rules,
@@ -225,7 +241,8 @@ def test_manual_source_tool_pipeline_with_local_html(temp_db_path) -> None:
     assert result.collected_count == 1
     assert result.valid_count == 1
     assert result.inserted_count == 1
-    assert [event.tool_name for event in collector.last_agent_result.tool_events] == ["web_search", "collect_page"]
+    assert agent_result is not None
+    assert [event.tool_name for event in agent_result.tool_events] == ["web_search", "collect_page"]
 
 
 def test_llm_job_extractor_uses_llm_client_interface(temp_db_path) -> None:
@@ -254,9 +271,24 @@ def test_llm_job_extractor_uses_llm_client_interface(temp_db_path) -> None:
         is_official=True,
         relevance_score=100,
     )
-    page = HttpPageCollectorTool().run(source)
+    page = HttpPageTool().run(source)
 
-    records = LLMJobExtractor(MockLLMClient()).extract(page)
+    provider = MockAIProvider(
+        {
+            "company_name": "Future Bank",
+            "title": "Data Analyst Graduate",
+            "location": "Shanghai",
+            "source_name": "Future Bank Careers",
+            "source_url": "mock://future-bank/job",
+            "apply_url": "https://careers.example/future-bank/job",
+        }
+    )
+
+    class MockExtractionClient:
+        def extract_jobs_from_page(self, _page):
+            return [validate_model(provider.generate_json("extract"), RawJobRecord)]
+
+    records = LLMJobExtractor(MockExtractionClient()).extract(page)
 
     assert records[0].company_name == "Future Bank"
     assert records[0].title == "Data Analyst Graduate"
@@ -272,7 +304,7 @@ def test_unconfigured_llm_job_extractor_fails_explicitly(temp_db_path) -> None:
         is_official=True,
         relevance_score=100,
     )
-    page = HttpPageCollectorTool().run(source)
+    page = HttpPageTool().run(source)
 
     with pytest.raises(RuntimeError, match="LLM job extraction is not configured"):
         UnconfiguredLLMJobExtractor().extract(page)

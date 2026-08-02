@@ -1,4 +1,3 @@
-from job_radar.collectors.demo import DemoCollector
 from job_radar.config import load_matching_rules, load_profile
 from job_radar.pipeline.deduplication import deduplicate_records
 from job_radar.pipeline.matching import match_records
@@ -6,18 +5,19 @@ from job_radar.pipeline.normalization import normalize_records
 from job_radar.pipeline.runner import PipelineRunner
 from job_radar.pipeline.validation import validate_records
 from job_radar.storage.repository import JobRepository
+from job_radar.tools.functions.demo_csv import DemoCsvTool
 from job_radar.utils.paths import CONFIG_DIR, DEMO_JOBS_PATH
 
 
-def test_demo_collector_reads_demo_data() -> None:
-    records = DemoCollector(DEMO_JOBS_PATH).collect()
+def test_demo_csv_tool_reads_demo_data() -> None:
+    records = DemoCsvTool(DEMO_JOBS_PATH).collect()
 
     assert len(records) == 6
     assert records[0].company_name == "China Mobile"
 
 
 def test_validation_rejects_invalid_job() -> None:
-    records = DemoCollector(DEMO_JOBS_PATH).collect()
+    records = DemoCsvTool(DEMO_JOBS_PATH).collect()
     result = validate_records(records)
 
     assert len(result.valid_records) == 5
@@ -26,7 +26,7 @@ def test_validation_rejects_invalid_job() -> None:
 
 
 def test_deduplication_removes_obvious_duplicate() -> None:
-    records = DemoCollector(DEMO_JOBS_PATH).collect()
+    records = DemoCsvTool(DEMO_JOBS_PATH).collect()
     valid = validate_records(records).valid_records
     normalized = normalize_records(valid)
     result = deduplicate_records(normalized)
@@ -38,7 +38,7 @@ def test_deduplication_removes_obvious_duplicate() -> None:
 def test_matcher_outputs_score_and_reasons() -> None:
     profile, _, _ = load_profile(CONFIG_DIR)
     rules, _, _ = load_matching_rules(CONFIG_DIR)
-    records = DemoCollector(DEMO_JOBS_PATH).collect()
+    records = DemoCsvTool(DEMO_JOBS_PATH).collect()
     normalized = normalize_records(validate_records(records).valid_records)
     unique = deduplicate_records(normalized).unique_records
 
@@ -52,7 +52,7 @@ def test_pipeline_result_counts(temp_db_path) -> None:
     profile, _, _ = load_profile(CONFIG_DIR)
     rules, _, _ = load_matching_rules(CONFIG_DIR)
     repository = JobRepository(temp_db_path)
-    runner = PipelineRunner(DemoCollector(DEMO_JOBS_PATH), repository, profile, rules)
+    runner = PipelineRunner(DemoCsvTool(DEMO_JOBS_PATH).collect, repository, profile, rules)
 
     result = runner.run()
 

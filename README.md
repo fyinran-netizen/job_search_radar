@@ -4,12 +4,14 @@ Job Radar is a local job discovery, matching, and application tracking tool. The
 
 This is not a complete web-wide recruitment crawler. The current focus is architecture, data pipeline behavior, and local job management.
 
+The long-term direction is the agent workflow in `docs/job_search_agent_full_flow.svg`: program-controlled orchestration, structured AI decisions, bounded tool execution, deterministic validation, and local persistence.
+
 ## Current Phase
 
 Phase one builds a working local pipeline:
 
 ```text
-Data Source -> Collector -> Raw Job Records -> Validation -> Normalization
+Data Source -> Tool/Extractor -> Raw Job Records -> Validation -> Normalization
 -> Deduplication -> Matching -> Persistence -> Service -> Streamlit UI
 ```
 
@@ -21,7 +23,7 @@ There is also a manual URL pipeline for early page-structure testing. It reads e
 
 ## Completed Features
 
-- Demo CSV collector with realistic sample jobs.
+- Demo CSV tool with realistic sample jobs.
 - Pydantic models for raw and processed job records.
 - Recoverable validation errors for bad records.
 - Basic company, title, and location normalization.
@@ -34,7 +36,7 @@ There is also a manual URL pipeline for early page-structure testing. It reads e
 - Mock agent workflow with mock web search, mock page collection, extractor-based structuring, and real Pipeline persistence.
 - Manual URL workflow with configured JD URLs, Python HTTP page collection, rule-based extraction, and real Pipeline persistence.
 - Extractor boundary for `PageContent -> RawJobRecord`, with a rule-based implementation now and an LLM adapter ready for future API integration.
-- pytest coverage for models, pipeline, repository, collector, and app import.
+- pytest coverage for models, pipeline, repository, tools, agent flow, and app import.
 
 ## Not Implemented Yet
 
@@ -69,11 +71,10 @@ app.py                         Streamlit UI
 config/                        Example YAML configuration
 data/demo_jobs.csv             Demo job source
 docs/                          Architecture and pipeline docs
-job_radar/collectors/          Data collectors
-job_radar/agents/              Agent workflow orchestration
-job_radar/extractors/          Rule-based page-to-job extraction
-job_radar/llm/                 LLM client interface and mock client
-job_radar/tools/               Tool scheduler, mock tools, and manual HTTP page collector
+job_radar/agent/               Workflow orchestration, state, guardrails, limits
+job_radar/ai/                  Skill loading, prompts, AI tasks, Codex CLI provider
+job_radar/extractors/          PageContent to RawJobRecord extraction boundary
+job_radar/tools/               ToolExecutor and deterministic function tools
 job_radar/models/              Pydantic models
 job_radar/pipeline/            Validation, normalization, deduplication, matching
 job_radar/storage/             SQLite database and repository
@@ -85,7 +86,9 @@ See `docs/project_structure.md` for more detail.
 
 ## Pipeline Overview
 
-1. `DemoCollector` reads raw demo jobs from CSV.
+The current runnable pipeline is the deterministic core of the future agent workflow.
+
+1. `DemoCsvTool` reads raw demo jobs from CSV.
 2. `validate_records` checks required fields and records invalid rows.
 3. `normalize_records` standardizes display fields and deduplication keys.
 4. `deduplicate_records` removes obvious duplicate jobs.
@@ -96,7 +99,7 @@ See `docs/project_structure.md` for more detail.
 The mock agent path runs before the same local pipeline:
 
 ```text
-ProfileCompletenessChecker -> SearchPlanBuilder -> ToolScheduler
+ProfileCompletenessChecker -> SearchPlanBuilder -> ToolExecutor
 -> mock web_search -> mock collect_page -> RuleBasedJobExtractor
 -> Validation -> Normalization -> Deduplication -> Matching -> SQLite
 ```
@@ -104,7 +107,7 @@ ProfileCompletenessChecker -> SearchPlanBuilder -> ToolScheduler
 The manual URL path also feeds the same local pipeline:
 
 ```text
-ManualSourceTool -> HttpPageCollectorTool -> RuleBasedJobExtractor
+ManualSourceTool -> HttpPageTool -> RuleBasedJobExtractor
 -> Validation -> Normalization
 -> Deduplication -> Matching -> SQLite
 ```
@@ -163,7 +166,7 @@ The repository should not include real names, emails, phone numbers, resumes, pr
 
 ## Roadmap
 
-- Add real company career-site collectors.
+- Add real company career-site tools.
 - Add CSV import for external job lists.
 - Improve deduplication beyond exact normalized keys.
 - Add richer matching rules and profile configuration.

@@ -2,8 +2,8 @@
 
 from abc import ABC, abstractmethod
 
-from job_radar.agents.models import PageContent
 from job_radar.models.job import RawJobRecord
+from job_radar.models.tool import PageContent
 
 
 class JobExtractor(ABC):

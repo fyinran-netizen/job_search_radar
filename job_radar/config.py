@@ -5,8 +5,8 @@ from typing import Any
 
 import yaml
 
-from job_radar.agents.models import CandidateSource
 from job_radar.models.profile import MatchingRules, UserProfile
+from job_radar.models.search import CandidateSource
 from job_radar.utils.paths import CONFIG_DIR
 
 

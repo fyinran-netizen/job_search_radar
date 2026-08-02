@@ -2,13 +2,15 @@
 
 This document is written with plain Markdown so it can be previewed without Mermaid support.
 
+`docs/job_search_agent_full_flow.svg` is the target workflow. This document explains how the current runnable pipeline maps to that target.
+
 Job Radar currently has three runnable ingestion paths:
 
 1. Demo CSV pipeline
 2. Mock Agent pipeline
 3. Manual URL pipeline
 
-Both paths eventually feed the same local processing pipeline:
+All current ingestion paths eventually feed the same deterministic local processing pipeline:
 
 ```text
 RawJobRecord
@@ -31,7 +33,7 @@ The demo path reads local sample data from `data/demo_jobs.csv`.
           |
           v
 +------------------+
-| DemoCollector    |
+| DemoCsvTool      |
 +---------+--------+
           |
           v
@@ -78,11 +80,11 @@ It uses:
 
 - `ProfileCompletenessChecker`
 - `SearchPlanBuilder`
-- `ToolScheduler`
+- `ToolExecutor`
 - `MockWebSearchTool`
-- `MockPageCollectorTool`
+- `MockPageTool`
 - `RuleBasedJobExtractor`
-- `AgentDiscoveryCollector`
+- `JobDiscoveryAgent`
 
 ```text
 +-----------------------+
@@ -103,7 +105,7 @@ It uses:
             |
             v
 +-----------------------+
-| ToolScheduler         |
+| ToolExecutor          |
 | Run mock web_search   |
 +-----------+-----------+
             |
@@ -114,7 +116,7 @@ It uses:
             |
             v
 +-----------------------+
-| ToolScheduler         |
+| ToolExecutor          |
 | Run mock collect_page |
 +-----------+-----------+
             |
@@ -131,7 +133,7 @@ It uses:
             |
             v
 +-----------------------+
-| AgentDiscoveryCollector |
+| JobDiscoveryAgent       |
 +-----------+-----------+
             |
             v
@@ -140,7 +142,7 @@ It uses:
 +-----------------------+
 ```
 
-After `AgentDiscoveryCollector`, the data enters the same processing steps as the demo CSV pipeline.
+After `JobDiscoveryAgent`, the extracted raw records enter the same processing steps as the demo CSV pipeline.
 
 ## 3. Manual URL Pipeline
 
@@ -167,7 +169,7 @@ This path does make a direct Python HTTP request to the explicitly configured UR
               |
               v
 +---------------------------+
-| HttpPageCollectorTool     |
+| HttpPageTool     |
 | fetch URL with urllib     |
 +-------------+-------------+
               |
@@ -193,13 +195,19 @@ This lets the project test the real page-fetching and backend structuring bounda
 
 ## 4. Full Target Pipeline
 
-This is the intended long-term shape of the project.
+This is the intended long-term shape of the project and should stay aligned with `docs/job_search_agent_full_flow.svg`.
 
 ```text
 User uploads resume / fills personal information
         |
         v
-AI extracts user profile
+Program checks file and extracts raw text
+        |
+        v
+AI returns CandidateProfile JSON
+        |
+        v
+Program validates and merges profile
         |
         v
 Profile completeness check
@@ -218,22 +226,28 @@ Profile completeness check
         +-- Information is enough
                 |
                 v
-        AI generates job search strategy
+        AI returns SearchStrategy JSON
                 |
                 v
-        Agent calls web_search
+        Program validates constraints
                 |
                 v
-        Candidate job/source URLs
+        AI returns ToolPlan JSON
                 |
                 v
-        Agent filters and ranks URLs
+        Program executes approved tools
+                |
+                v
+        RawSearchResult / CandidateSource URLs
+                |
+                v
+        Program filters and ranks URLs
                 |
                 v
         collect_page fetches page content
                 |
                 v
-        Job information extraction
+        JobExtractor creates RawJobRecord
                 |
                 v
         Validation
@@ -245,10 +259,20 @@ Profile completeness check
         Deduplication
                 |
                 v
-        Job requirement understanding
+        AI returns JobUnderstanding JSON
                 |
                 v
-        Match Analysis
+        AI/rules return MatchAssessment JSON
+                |
+                v
+        AI returns ContinueDecision JSON
+                |
+                +-- continue within limits
+                |       |
+                |       v
+                |   update SearchStrategy and run next round
+                |
+                +-- stop / enough / over limit
                 |
                 v
         SQLite
@@ -257,7 +281,21 @@ Profile completeness check
         Streamlit UI
 ```
 
-## 5. Step Responsibilities
+## 5. SVG Alignment Principles
+
+The target SVG uses a strict division of responsibility:
+
+| Responsibility | Owner | Why |
+| --- | --- | --- |
+| Workflow control | Program / Orchestrator | Prevents AI from skipping validation, persistence rules, budgets, or privacy boundaries. |
+| Ambiguous understanding | AI | Resume interpretation, search strategy, varied JD extraction, requirement understanding, and match explanation need semantic judgment. |
+| External action | Tools | Web search, URL fetch, file parsing, browser/site adapters, and future APIs should be explicit tool calls. |
+| Data quality | Pydantic + pipeline code | Every AI/tool output must pass schema validation, normalization, deduplication, and persistence rules. |
+| User state | SQLite repository | Status, notes, favorites, and application history must not be overwritten by re-imports or AI output. |
+
+This is why the current project should avoid growing page-specific parsing rules indefinitely. `RuleBasedJobExtractor` is useful as a mock/fallback, but varied pages should eventually go through `LLMJobExtractor` plus Pydantic validation.
+
+## 6. Current Step Responsibilities
 
 | Step | Current implementation | Input | Output | Responsibility |
 | --- | --- | --- | --- | --- |
@@ -266,11 +304,11 @@ Profile completeness check
 | Search plan | `SearchPlanBuilder` | `UserProfile` | `SearchPlan` | Generate target roles, locations, company types, and keywords. |
 | Mock web search | `MockWebSearchTool` | `SearchPlan` | `CandidateSource` list | Simulate finding candidate URLs. No network requests. |
 | Manual source URLs | `ManualSourceTool` | Configured sources | `CandidateSource` list | Return explicitly configured URLs for manual testing. |
-| Mock page collection | `MockPageCollectorTool` | `CandidateSource` | `PageContent` | Simulate fetching page text. No network requests. |
-| HTTP page collection | `HttpPageCollectorTool` | `CandidateSource` | `PageContent` | Fetch one explicitly configured URL and extract visible text and links with Python stdlib. |
+| Mock page collection | `MockPageTool` | `CandidateSource` | `PageContent` | Simulate fetching page text. No network requests. |
+| HTTP page collection | `HttpPageTool` | `CandidateSource` | `PageContent` | Fetch one explicitly configured URL and extract visible text and links with Python stdlib. |
 | Job extraction | `RuleBasedJobExtractor` | `PageContent` | `RawJobRecord` list | Convert marker text or simple JD detail pages into raw job records. No LLM API call is made. |
 | Future LLM extraction | `LLMJobExtractor` plus concrete `LLMClient` | `PageContent` | `RawJobRecord` list | Future replacement for rule-based extraction when page formats become too varied for deterministic parsing. |
-| Demo collection | `DemoCollector` | `data/demo_jobs.csv` | `RawJobRecord` list | Read local demo CSV jobs. |
+| Demo collection | `DemoCsvTool` | `data/demo_jobs.csv` | `RawJobRecord` list | Read local demo CSV jobs. |
 | Validation | `validate_records` | `RawJobRecord` list | Valid records and errors | Reject records missing required fields. |
 | Normalization | `normalize_records` | Valid raw records | `JobRecord` list | Standardize company, title, location, and deduplication key. |
 | Deduplication | `deduplicate_records` | `JobRecord` list | Unique jobs and duplicates | Remove obvious duplicate jobs. |
@@ -279,11 +317,41 @@ Profile completeness check
 | Service | `JobService` | Repository data | DataFrame / job list | Provide UI-ready job data and update methods. |
 | UI | `app.py` | Services | Streamlit page | Show jobs, run pipelines, edit status/notes, export CSV. |
 
-## 6. Data Shape
+## 7. Future Structured AI Decisions
+
+The SVG implies several AI return types. These should become Pydantic models before real LLM calls are added:
+
+| Decision model | Purpose | Must be validated before use |
+| --- | --- | --- |
+| `CandidateProfileDecision` | Extract education, graduation date, skills, projects, preferences, uncertain fields. | Required fields, date format, confidence, no private data leakage. |
+| `CompletenessDecision` | Decide whether profile is sufficient and what questions to ask. | `sufficient`, missing critical fields, user-facing questions. |
+| `SearchStrategy` | Generate role groups, queries, source priorities, exclusions, target count, max rounds. | Query length, allowed sources, target limits, privacy rules. |
+| `ToolPlan` | Choose tools and call order for one search round. | Tool names, args schema, domains, rate/budget limits. |
+| `JobUnderstanding` | Understand role type, campus eligibility, hard requirements, risks. | Valid role taxonomy, confidence, source evidence. |
+| `MatchAssessment` | Score fit, gaps, recommendation, explanation. | Score range, required reasons, no unsupported claims. |
+| `ContinueDecision` | Decide whether another search round is needed. | Round limit, target count, source coverage, budget. |
+
+The current code already has models for `UserProfile`, `SearchPlan`, `CandidateSource`, `PageContent`, `RawJobRecord`, and `JobRecord`. The future models above should be added around those existing models, not replace them.
+
+## 8. Migration Path Toward The SVG
+
+The recommended migration order is:
+
+1. Add an `orchestrator/` layer that owns run state, round limits, and the fixed workflow.
+2. Add Pydantic models for `CandidateProfileDecision`, `SearchStrategy`, `ToolPlan`, `JobUnderstanding`, `MatchAssessment`, and `ContinueDecision`.
+3. Replace deterministic `SearchPlanBuilder` with an AI-backed task in `ai/tasks`, keeping validation and fallbacks.
+4. Replace `ManualSourceTool` / `MockWebSearchTool` with a real search tool behind the same `ToolExecutor`.
+5. Replace most rule-based page extraction with `LLMJobExtractor`, while keeping `RuleBasedJobExtractor` for mock pages and fallback.
+6. Add AI-backed job understanding and match assessment after normalization/deduplication.
+7. Persist run logs, decision JSON, tool events, and user feedback so later rounds can improve search.
+
+The existing validation, normalization, deduplication, repository, and Streamlit status/notes behavior should remain stable during this migration.
+
+## 9. Data Shape
 
 ### RawJobRecord
 
-`RawJobRecord` is the raw structure returned by a collector or extraction step.
+`RawJobRecord` is the raw structure returned by a tool or extraction step.
 
 It contains source-facing fields such as:
 
@@ -322,7 +390,7 @@ It keeps the raw fields and adds:
 - `created_at`
 - `updated_at`
 
-## 7. Pipeline Result
+## 10. Pipeline Result
 
 Each pipeline run returns a `PipelineResult`.
 
@@ -350,7 +418,7 @@ Meaning:
 | `failed_count` | Number of records that failed during persistence. |
 | `errors` | Validation or persistence errors that did not stop the whole run. |
 
-## 8. Error Handling
+## 11. Error Handling
 
 Single bad records should not stop the whole pipeline.
 
@@ -362,14 +430,14 @@ Current behavior:
 - Persistence failures increase `failed_count`.
 - Valid later records continue processing.
 
-## 9. Current UI Buttons
+## 12. Current UI Buttons
 
 ### Load demo jobs
 
 Runs:
 
 ```text
-DemoCollector
+DemoCsvTool
 -> Validation
 -> Normalization
 -> Deduplication
@@ -384,11 +452,10 @@ Runs:
 ```text
 ProfileCompletenessChecker
 -> SearchPlanBuilder
--> ToolScheduler
+-> ToolExecutor
 -> MockWebSearchTool
--> MockPageCollectorTool
+-> MockPageTool
 -> RuleBasedJobExtractor
--> AgentDiscoveryCollector
 -> Validation
 -> Normalization
 -> Deduplication
@@ -404,9 +471,8 @@ Runs:
 
 ```text
 ManualSourceTool
--> HttpPageCollectorTool
+-> HttpPageTool
 -> RuleBasedJobExtractor
--> AgentDiscoveryCollector
 -> Validation
 -> Normalization
 -> Deduplication
@@ -416,7 +482,7 @@ ManualSourceTool
 
 This button proves that a manually configured real JD URL can be fetched and structured before it enters the existing local pipeline.
 
-## 10. What Is Not Implemented Yet
+## 13. What Is Not Implemented Yet
 
 The current project does not yet include:
 
@@ -426,5 +492,7 @@ The current project does not yet include:
 - Real resume parsing
 - Real AI match analysis
 - Real crawling of recruitment websites
+- Orchestrator run state and iterative search rounds
+- Structured AI decision models from the SVG
 
 Those can be added later by replacing `RuleBasedJobExtractor` with `LLMJobExtractor(real_client)` and replacing mock search tools with real search tools while keeping the local validation, normalization, deduplication, persistence, and UI layers.

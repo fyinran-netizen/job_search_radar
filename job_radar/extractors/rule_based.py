@@ -3,9 +3,9 @@
 import re
 from urllib.parse import urljoin
 
-from job_radar.agents.models import PageContent
 from job_radar.extractors.base import JobExtractor
 from job_radar.models.job import RawJobRecord
+from job_radar.models.tool import PageContent
 
 
 FIELD_ALIASES = {

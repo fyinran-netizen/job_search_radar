@@ -1,9 +1,10 @@
 """End-to-end pipeline orchestration."""
 
 from dataclasses import asdict, dataclass, field
+from collections.abc import Callable
 from typing import Any
 
-from job_radar.collectors.base import BaseCollector
+from job_radar.models.job import RawJobRecord
 from job_radar.models.profile import MatchingRules, UserProfile
 from job_radar.pipeline.deduplication import deduplicate_records
 from job_radar.pipeline.matching import match_records
@@ -34,12 +35,12 @@ class PipelineRunner:
 
     def __init__(
         self,
-        collector: BaseCollector,
+        collect_raw_records: Callable[[], list[RawJobRecord]],
         repository: JobRepository,
         profile: UserProfile,
         rules: MatchingRules,
     ) -> None:
-        self.collector = collector
+        self.collect_raw_records = collect_raw_records
         self.repository = repository
         self.profile = profile
         self.rules = rules
@@ -48,7 +49,7 @@ class PipelineRunner:
         """Run the complete ingestion pipeline."""
 
         result = PipelineResult()
-        raw_records = self.collector.collect()
+        raw_records = self.collect_raw_records()
         result.collected_count = len(raw_records)
 
         validation_result = validate_records(raw_records)

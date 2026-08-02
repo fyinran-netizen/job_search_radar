@@ -1,7 +1,17 @@
 # Project Structure
 
 ```text
-job-radar/
+job_search_radar/
+|-- .agents/
+|   `-- skills/
+|       |-- profile-builder/
+|       |-- profile-completeness/
+|       |-- search-strategy/
+|       |-- source-selection/
+|       |-- job-extraction/
+|       |-- job-understanding/
+|       |-- match-analysis/
+|       `-- search-review/
 |-- app.py
 |-- .gitignore
 |-- pyproject.toml
@@ -18,32 +28,45 @@ job-radar/
 |-- docs/
 |   |-- architecture.md
 |   |-- pipeline.md
-|   `-- project_structure.md
+|   |-- project_structure.md
+|   `-- job_search_agent_full_flow.svg
 |-- job_radar/
 |   |-- __init__.py
 |   |-- config.py
-|   |-- agents/
+|   |-- agent/
 |   |   |-- __init__.py
-|   |   |-- discovery.py
-|   |   |-- models.py
-|   |   |-- profile.py
-|   |   `-- search_plan.py
-|   |-- collectors/
+|   |   |-- orchestrator.py
+|   |   |-- state.py
+|   |   |-- transitions.py
+|   |   |-- guardrails.py
+|   |   `-- limits.py
+|   |-- ai/
 |   |   |-- __init__.py
-|   |   |-- agent.py
-|   |   |-- base.py
-|   |   `-- demo.py
+|   |   |-- skill_loader.py
+|   |   |-- prompt_builder.py
+|   |   |-- structured_output.py
+|   |   |-- providers/
+|   |   |   |-- __init__.py
+|   |   |   |-- base.py
+|   |   |   |-- codex_cli.py
+|   |   |   `-- mock.py
+|   |   `-- tasks/
+|   |       |-- __init__.py
+|   |       |-- profile_completeness.py
+|   |       `-- search_strategy.py
 |   |-- extractors/
 |   |   |-- __init__.py
-|   |   `-- rule_based.py
-|   |-- llm/
-|   |   |-- __init__.py
 |   |   |-- base.py
-|   |   `-- mock.py
+|   |   |-- llm.py
+|   |   `-- rule_based.py
 |   |-- models/
 |   |   |-- __init__.py
+|   |   |-- decisions.py
 |   |   |-- job.py
-|   |   `-- profile.py
+|   |   |-- profile.py
+|   |   |-- run.py
+|   |   |-- search.py
+|   |   `-- tool.py
 |   |-- pipeline/
 |   |   |-- __init__.py
 |   |   |-- validation.py
@@ -62,11 +85,15 @@ job-radar/
 |   |-- tools/
 |   |   |-- __init__.py
 |   |   |-- base.py
+|   |   |-- executor.py
 |   |   |-- factory.py
-|   |   |-- http_page_collector.py
-|   |   |-- manual_sources.py
-|   |   |-- mock_page_collector.py
-|   |   `-- mock_web_search.py
+|   |   `-- functions/
+|   |       |-- __init__.py
+|   |       |-- demo_csv.py
+|   |       |-- http_page.py
+|   |       |-- manual_sources.py
+|   |       |-- mock_page.py
+|   |       `-- mock_web_search.py
 |   `-- utils/
 |       |-- __init__.py
 |       |-- logging.py
@@ -80,34 +107,44 @@ job-radar/
     `-- test_repository.py
 ```
 
-## Main Modules
+## Responsibility Boundaries
 
-`app.py` is the Streamlit entry point. It calls services and contains no SQL.
+`.agents/skills/` contains Codex-style skill instructions. These files define how AI should think and what JSON it should return. They are prompt assets, not Python business logic.
 
-`job_radar/models/` defines `RawJobRecord`, `JobRecord`, `UserProfile`, and `MatchingRules`.
+`job_radar/ai/tasks/` contains AI-facing business tasks. Current tasks are deterministic fallbacks for profile completeness and search strategy. Future Codex-backed tasks should live here, not under `tools/`.
 
-`job_radar/agents/` coordinates profile checks, search planning, tool calls, URL selection, page collection, and extraction. It depends on the `JobExtractor` interface instead of a concrete LLM client.
+`job_radar/ai/providers/` contains low-level AI providers. `CodexCliProvider` only runs `codex exec` and parses JSON. It must not contain job-search business rules.
 
-`job_radar/collectors/` contains pipeline-facing collectors. `DemoCollector` reads local CSV demo data. `AgentDiscoveryCollector` adapts the agent result into the same `RawJobRecord` list expected by `PipelineRunner`.
+`job_radar/agent/` owns workflow control: orchestration, state, transitions, limits, and guardrails. It decides when to call tasks, tools, and extractors, but it does not fetch pages directly or write to storage.
 
-`job_radar/extractors/` contains the `JobExtractor` interface and implementations. `RuleBasedJobExtractor` handles mock marker blocks and simple Chinese JD detail pages. `LLMJobExtractor` is the future adapter for a real LLM client.
+`job_radar/tools/` contains executable actions. `tools/functions/` holds deterministic Python tools such as demo CSV reading, manual source loading, mock search, mock page collection, and HTTP page fetching. `ToolExecutor` executes tools and records tool events.
 
-`job_radar/llm/` defines the LLM client interface and a deterministic mock client for tests. No real LLM API key is required in the current phase.
+`job_radar/extractors/` owns the boundary from `PageContent` to `RawJobRecord`. `RuleBasedJobExtractor` is the current implementation and fallback. `LLMJobExtractor` is the adapter for future AI-backed extraction.
 
-`job_radar/tools/` defines tool interfaces and scheduler wiring. Current tools include mock web search, mock page collection, manually configured URL sources, and a Python HTTP page collector for explicit URLs in `config/sources.example.yaml`.
+`job_radar/pipeline/` contains deterministic data processing only: validation, normalization, deduplication, matching, and runner orchestration. It does not call Codex, web search, or Streamlit.
 
-`job_radar/pipeline/` contains the stable local processing steps: validation, normalization, deduplication, matching, and orchestration.
+`job_radar/storage/` owns SQLite schema and repository methods. User-managed fields such as status and notes must be preserved on re-import.
 
-`job_radar/storage/` owns SQLite initialization and parameterized repository methods. It reports whether each upsert inserted, updated, or failed.
+`job_radar/services/` exposes use cases to UI and tests. It wires profile config, tools, agent orchestration, pipeline runner, and repository.
 
-`job_radar/services/` provides application use cases consumed by Streamlit, including demo ingestion, mock agent ingestion, manual URL ingestion, job listing, status updates, notes updates, and CSV export.
+`app.py` is the Streamlit entry point. It should call services and never execute SQL or Codex directly.
 
-`job_radar/utils/` contains shared paths and logging helpers.
+## Removed Overlap
 
-`tests/` verifies models, collectors, agent tools, extraction, pipeline behavior, repository persistence, and app import behavior. Tests use temporary databases and do not write to `data/jobs.db`.
+The old `collectors/`, plural `agents/`, and `llm/` packages were removed to avoid duplicate responsibilities:
 
-## Local Data
+- CSV reading is now `tools/functions/demo_csv.py`.
+- Agent flow control is now `agent/orchestrator.py`.
+- Profile/search decisions are now `ai/tasks/`.
+- Codex or model invocation belongs in `ai/providers/`.
 
-`data/jobs.db` is created at runtime and ignored by Git. `data/demo_jobs.csv` is safe to commit because it contains demo records only.
+This keeps each module focused on one question:
 
-`config/profile.yaml`, `config/sources.yaml`, and `config/matching_rules.yaml` are private local files. If they are absent, the app falls back to the `.example.yaml` files.
+```text
+AI tasks: how should AI decide?
+Tools: what action should be executed?
+Agent: what step runs next?
+Pipeline: how is data cleaned and constrained?
+Storage: how is data persisted safely?
+UI: how is the result shown?
+```
