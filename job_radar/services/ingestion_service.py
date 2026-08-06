@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from job_radar.agent.orchestrator import JobDiscoveryAgent
+from job_radar.ai.tasks.search_strategy import create_search_plan_builder
 from job_radar.config import load_candidate_sources, load_matching_rules, load_profile
 from job_radar.extractors.rule_based import RuleBasedJobExtractor
 from job_radar.models.decisions import AgentRunResult
@@ -23,10 +24,12 @@ class IngestionService:
         db_path: Path = DEFAULT_DB_PATH,
         config_dir: Path = CONFIG_DIR,
         demo_csv_path: Path = DEMO_JOBS_PATH,
+        enable_codex_ai: bool = False,
     ) -> None:
         self.db_path = db_path
         self.config_dir = config_dir
         self.demo_csv_path = demo_csv_path
+        self.enable_codex_ai = enable_codex_ai
 
     def run_demo_pipeline(self) -> tuple[PipelineResult, list[str]]:
         """Run the demo CSV tool through the complete pipeline."""
@@ -50,6 +53,7 @@ class IngestionService:
         agent = JobDiscoveryAgent(
             job_extractor=RuleBasedJobExtractor(),
             tool_executor=create_mock_tool_executor(),
+            search_plan_builder=create_search_plan_builder(self.enable_codex_ai),
         )
         agent_result: AgentRunResult | None = None
 
@@ -67,6 +71,7 @@ class IngestionService:
         pipeline_result = runner.run()
         if agent_result is None:
             raise RuntimeError("Agent did not produce a run result.")
+        notices.extend(self._search_plan_notices(agent_result))
         return pipeline_result, notices, agent_result
 
     def run_manual_source_pipeline(self) -> tuple[PipelineResult, list[str], AgentRunResult]:
@@ -81,6 +86,7 @@ class IngestionService:
         agent = JobDiscoveryAgent(
             job_extractor=RuleBasedJobExtractor(),
             tool_executor=create_manual_http_tool_executor(sources),
+            search_plan_builder=create_search_plan_builder(False),
         )
         agent_result: AgentRunResult | None = None
 
@@ -98,6 +104,7 @@ class IngestionService:
         pipeline_result = runner.run()
         if agent_result is None:
             raise RuntimeError("Agent did not produce a run result.")
+        notices.extend(self._search_plan_notices(agent_result))
         return pipeline_result, notices, agent_result
 
     def _load_profile_rules_and_notices(self) -> tuple[UserProfile, MatchingRules, list[str]]:
@@ -109,3 +116,11 @@ class IngestionService:
         if rules_are_example:
             notices.append(f"Using example matching rules config: {rules_path}")
         return profile, rules, notices
+
+    @staticmethod
+    def _search_plan_notices(agent_result: AgentRunResult) -> list[str]:
+        if agent_result.search_plan_source == "codex_cli":
+            return ["Search plan generated with local Codex CLI using the active user's own Codex login."]
+        if agent_result.search_plan_error:
+            return [f"Using deterministic search plan fallback: {agent_result.search_plan_error}"]
+        return []

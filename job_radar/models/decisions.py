@@ -2,16 +2,9 @@
 
 from pydantic import BaseModel, Field
 
+from job_radar.models.profile import ProfileCompletenessResult
 from job_radar.models.search import CandidateSource, SearchPlan
 from job_radar.models.tool import ToolEvent
-
-
-class ProfileCompletenessResult(BaseModel):
-    """Result of checking whether a user profile is usable for search."""
-
-    is_complete: bool
-    missing_fields: list[str] = Field(default_factory=list)
-    questions: list[str] = Field(default_factory=list)
 
 
 class AgentRunResult(BaseModel):
@@ -19,6 +12,8 @@ class AgentRunResult(BaseModel):
 
     profile_check: ProfileCompletenessResult
     search_plan: SearchPlan | None = None
+    search_plan_source: str = "deterministic"
+    search_plan_error: str | None = None
     candidate_sources: list[CandidateSource] = Field(default_factory=list)
     selected_sources: list[CandidateSource] = Field(default_factory=list)
     collected_pages_count: int = 0

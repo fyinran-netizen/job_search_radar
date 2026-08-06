@@ -1,21 +1,29 @@
 import pytest
 
 from job_radar.agent.orchestrator import JobDiscoveryAgent
+from job_radar.cli.collect_pages import main as collect_pages_cli_main
+from job_radar.cli.search_strategy import main as search_strategy_cli_main
+from job_radar.cli.web_search import main as web_search_cli_main
+from job_radar.ai.providers.codex_cli import CodexCliDebugInfo, CodexCliProvider
 from job_radar.ai.providers.mock import MockAIProvider
 from job_radar.ai.structured_output import validate_model
-from job_radar.ai.tasks.profile_completeness import ProfileCompletenessChecker
-from job_radar.ai.tasks.search_strategy import SearchPlanBuilder
+from job_radar.ai.tasks.job_extraction import AIJobExtractionClient, build_ai_page_input
+from job_radar.ai.tasks.search_strategy import AISearchPlanBuilder, AutoSearchPlanBuilder, SearchPlanBuilder
 from job_radar.config import load_candidate_sources, load_matching_rules, load_profile
 from job_radar.extractors.llm import LLMJobExtractor, UnconfiguredLLMJobExtractor
 from job_radar.extractors.rule_based import RuleBasedJobExtractor
 from job_radar.models.job import RawJobRecord
-from job_radar.models.search import CandidateSource
+from job_radar.models.search import CandidateSource, SearchPlan
 from job_radar.models.profile import UserProfile
+from job_radar.models.tool import PageContent
+from job_radar.pipeline.page_filter import filter_pages
 from job_radar.pipeline.runner import PipelineRunner
+from job_radar.profile.completeness import ProfileCompletenessChecker
 from job_radar.services.ingestion_service import IngestionService
 from job_radar.storage.repository import JobRepository
 from job_radar.tools.executor import ToolExecutor
 from job_radar.tools.factory import create_mock_tool_executor
+from job_radar.tools.functions.codex_web_search import CodexWebSearchTool
 from job_radar.tools.functions.http_page import HttpPageTool
 from job_radar.tools.functions.manual_sources import ManualSourceTool
 from job_radar.utils.paths import CONFIG_DIR
@@ -33,6 +41,33 @@ def test_profile_checker_reports_incomplete_profile() -> None:
     assert result.questions
 
 
+def test_profile_checker_allows_optional_preferences() -> None:
+    profile = UserProfile(
+        graduation_date="2026",
+        target_roles=["Data Analyst"],
+        skills=["Python"],
+    )
+
+    result = ProfileCompletenessChecker().check(profile)
+
+    assert result.is_complete
+    assert result.missing_fields == []
+
+
+def test_profile_checker_requires_graduation_year() -> None:
+    profile = UserProfile(
+        graduation_date="next winter",
+        target_roles=["Data Analyst"],
+        skills=["Python"],
+        preferred_locations=["Shanghai"],
+    )
+
+    result = ProfileCompletenessChecker().check(profile)
+
+    assert not result.is_complete
+    assert result.missing_fields == ["graduation_date"]
+
+
 def test_search_plan_builder_generates_keywords() -> None:
     profile, _, _ = load_profile(CONFIG_DIR)
 
@@ -41,6 +76,237 @@ def test_search_plan_builder_generates_keywords() -> None:
     assert "Data Analyst graduate" in plan.keywords
     assert "graduate jobs Shanghai" in plan.keywords
     assert "Bank graduate program" in plan.keywords
+
+
+def test_ai_search_plan_builder_uses_skill_provider() -> None:
+    profile, _, _ = load_profile(CONFIG_DIR)
+    provider = MockAIProvider(
+        {
+            "target_roles": ["Data Analyst"],
+            "locations": ["Sydney"],
+            "company_types": ["Technology"],
+            "keywords": ["Data Analyst graduate 2026 Sydney"],
+        }
+    )
+
+    plan = AISearchPlanBuilder(provider).build(profile)
+
+    assert plan.keywords == ["Data Analyst graduate 2026 Sydney"]
+    assert provider.prompts
+    assert "Search Strategy" in provider.prompts[0]
+
+
+def test_auto_search_plan_builder_falls_back_when_codex_unavailable() -> None:
+    class UnavailableCodexProvider:
+        def is_available(self) -> bool:
+            return False
+
+        def generate_json(self, _prompt):
+            raise AssertionError("Codex should not be called when unavailable")
+
+    profile, _, _ = load_profile(CONFIG_DIR)
+    builder = AutoSearchPlanBuilder(codex_provider=UnavailableCodexProvider())  # type: ignore[arg-type]
+
+    plan = builder.build(profile)
+
+    assert builder.last_source == "deterministic"
+    assert "not installed or not authenticated" in (builder.last_error or "")
+    assert "Data Analyst graduate" in plan.keywords
+
+
+def test_auto_search_plan_builder_falls_back_when_codex_output_fails() -> None:
+    class FailingCodexProvider:
+        def is_available(self) -> bool:
+            return True
+
+        def generate_json(self, _prompt):
+            raise RuntimeError("bad codex output")
+
+    profile, _, _ = load_profile(CONFIG_DIR)
+    builder = AutoSearchPlanBuilder(codex_provider=FailingCodexProvider())  # type: ignore[arg-type]
+
+    plan = builder.build(profile)
+
+    assert builder.last_source == "deterministic"
+    assert builder.last_error == "bad codex output"
+    assert "Data Analyst graduate" in plan.keywords
+
+
+def test_search_strategy_cli_prints_deterministic_plan(capsys) -> None:
+    exit_code = search_strategy_cli_main(["--provider", "deterministic", "--show-meta"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert '"provider": "deterministic"' in captured.out
+    assert "Data Analyst graduate" in captured.out
+
+
+def test_search_strategy_cli_reports_incomplete_profile(capsys, tmp_path) -> None:
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(
+        '{"graduation_date": "2026", "target_roles": [], "skills": ["Python"]}',
+        encoding="utf-8",
+    )
+
+    exit_code = search_strategy_cli_main(
+        [
+            "--provider",
+            "deterministic",
+            "--profile-file",
+            str(profile_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert '"is_complete": false' in captured.out
+    assert "target_roles" in captured.out
+
+
+def test_search_strategy_cli_debug_prints_codex_raw_output(capsys, monkeypatch) -> None:
+    class FakeCodexProvider:
+        last_debug_info = CodexCliDebugInfo(
+            command=["codex", "exec"],
+            prompt="prompt text",
+            stdout="raw stdout",
+            stderr="raw stderr",
+            returncode=0,
+        )
+
+        def is_available(self) -> bool:
+            return True
+
+        def generate_json(self, _prompt):
+            raise RuntimeError("bad json")
+
+    monkeypatch.setattr(
+        "job_radar.cli.search_strategy.CodexCliProvider",
+        lambda: FakeCodexProvider(),
+    )
+
+    exit_code = search_strategy_cli_main(["--provider", "codex", "--debug"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 3
+    assert "Search strategy generation failed: bad json" in captured.err
+    assert "--- DEBUG: Prompt sent to Codex ---" in captured.err
+    assert "raw stdout" in captured.err
+    assert "raw stderr" in captured.err
+
+
+def test_codex_provider_uses_utf8_for_prompt(monkeypatch) -> None:
+    captured = {}
+
+    def fake_which(_command):
+        return "codex.CMD"
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["input"] = kwargs.get("input")
+        captured["encoding"] = kwargs.get("encoding")
+        captured["errors"] = kwargs.get("errors")
+
+        class Result:
+            returncode = 0
+            stdout = '{"target_roles":[],"locations":[],"company_types":[],"keywords":[]}'
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr("job_radar.ai.providers.codex_cli.shutil.which", fake_which)
+    monkeypatch.setattr("job_radar.ai.providers.codex_cli.subprocess.run", fake_run)
+
+    provider = CodexCliProvider()
+    provider.generate_json("\ufeff生成搜索策略")
+
+    assert captured["command"] == ["codex.CMD", "exec"]
+    assert captured["input"] == "\ufeff生成搜索策略"
+    assert captured["encoding"] == "utf-8"
+    assert captured["errors"] == "replace"
+
+
+def test_codex_web_search_tool_validates_candidate_sources() -> None:
+    class FakeProvider:
+        def __init__(self) -> None:
+            self.prompt = ""
+
+        def generate_json(self, prompt, timeout_seconds=240):
+            self.prompt = prompt
+            return [
+                {
+                    "url": "https://careers.example/job/123",
+                    "title": "Data Analyst Graduate",
+                    "source_name": "Example Careers",
+                    "company_name": "Example",
+                    "company_type": "Technology",
+                    "is_official": True,
+                    "relevance_score": 92,
+                    "reason": "Concrete graduate job page.",
+                }
+            ]
+
+    provider = FakeProvider()
+    plan = SearchPlanBuilder().build(load_profile(CONFIG_DIR)[0])
+
+    sources = CodexWebSearchTool(provider=provider).run(plan)  # type: ignore[arg-type]
+
+    assert sources[0].url == "https://careers.example/job/123"
+    assert sources[0].relevance_score == 92
+    assert "Use web search" in provider.prompt
+
+
+def test_web_search_cli_prints_mock_sources(capsys, tmp_path) -> None:
+    plan_path = tmp_path / "search_plan.json"
+    plan_path.write_text(
+        '{"target_roles":["Data Analyst"],"locations":["Shanghai"],"company_types":["Bank"],"keywords":["Data Analyst graduate Shanghai"]}',
+        encoding="utf-8",
+    )
+
+    exit_code = web_search_cli_main(["--provider", "mock", "--plan-file", str(plan_path)])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "mock://future-bank/campus" in captured.out
+
+
+def test_web_search_cli_debug_prints_codex_raw_output(capsys, monkeypatch, tmp_path) -> None:
+    class FakeCodexProvider:
+        last_debug_info = CodexCliDebugInfo(
+            command=["codex", "exec"],
+            prompt="web search prompt",
+            stdout="raw web stdout",
+            stderr="raw web stderr",
+            returncode=0,
+        )
+
+        def is_available(self) -> bool:
+            return True
+
+        def generate_json(self, _prompt, timeout_seconds=240):
+            raise RuntimeError("bad web json")
+
+    plan_path = tmp_path / "search_plan.json"
+    plan_path.write_text(
+        '{"target_roles":["Data Analyst"],"locations":["Shanghai"],"company_types":["Bank"],"keywords":["Data Analyst graduate Shanghai"]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "job_radar.cli.web_search.CodexCliProvider",
+        lambda: FakeCodexProvider(),
+    )
+
+    exit_code = web_search_cli_main(["--provider", "codex", "--plan-file", str(plan_path), "--debug"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 3
+    assert "web_search failed: bad web json" in captured.err
+    assert "raw web stdout" in captured.err
+    assert "raw web stderr" in captured.err
 
 
 def test_agent_tool_executor_runs_mock_search_and_collection() -> None:
@@ -143,7 +409,183 @@ def test_http_page_tool_reads_local_html(temp_db_path) -> None:
     assert page.title == "驱动开发工程师（2026校园招聘）"
     assert "工作职责" in page.text
     assert page.metadata["company_name"] == "苏州科达科技股份有限公司"
+    assert page.metadata["status_code"] == 200
+    assert page.metadata["final_url"].startswith("file:")
     assert page.metadata["links"][0]["href"].endswith("/apply")
+
+
+def test_page_filter_accepts_job_like_page() -> None:
+    page = PageContent(
+        url="https://careers.example/job/123",
+        source_name="Example Careers",
+        title="Data Analyst Graduate 2026",
+        text=(
+            "Graduate Program responsibilities requirements qualifications location apply "
+            "Python SQL data analysis role for early careers candidates. "
+            "This page contains enough job description content for extraction."
+        ),
+        metadata={"status_code": 200, "final_url": "https://careers.example/job/123"},
+    )
+
+    result = filter_pages([page], min_text_length=80)
+
+    assert result.accepted_pages == [page]
+    assert result.rejected_pages == []
+
+
+def test_page_filter_rejects_obvious_non_job_page() -> None:
+    page = PageContent(
+        url="https://careers.example/login",
+        source_name="Example Careers",
+        title="Login",
+        text="Please login or sign in to continue.",
+        metadata={"status_code": 200, "final_url": "https://careers.example/login"},
+    )
+
+    result = filter_pages([page], min_text_length=80)
+
+    assert result.accepted_pages == []
+    assert result.rejected_pages[0].url == "https://careers.example/login"
+    assert any("auth_wall" in reason for reason in result.rejected_pages[0].reasons)
+
+
+def test_page_filter_does_not_reject_job_page_for_nav_login_words() -> None:
+    page = PageContent(
+        url="https://www.boc.cn/aboutboc/bi4/202603/t20260311_25654053.html",
+        source_name="Bank of China",
+        title="Bank of China 2026 Spring Recruitment Notice",
+        text=(
+            "登录 注册 中国银行股份有限公司2026年春季招聘公告 "
+            "招聘公告 校园招聘 工作地点 任职要求 岗位职责 数据分析 科技岗 "
+            "This page contains detailed campus recruitment information for 2026 graduates."
+        ),
+        metadata={"status_code": 200, "final_url": "https://www.boc.cn/aboutboc/bi4/202603/t20260311_25654053.html"},
+    )
+
+    result = filter_pages([page], min_text_length=80)
+
+    assert result.accepted_pages == [page]
+    assert result.rejected_pages == []
+
+
+def test_page_filter_keeps_redirected_detail_to_listing_page() -> None:
+    page = PageContent(
+        url="https://group.bnpparibas/en/careers/job-offer/bnp-paribas-sydney-2026-graduate-programme",
+        source_name="BNP Paribas Careers",
+        title="Job offers for the job function Finance accounts and management control - BNP Paribas",
+        text=(
+            "Graduate programme qualifications location apply 2026 Sydney Bank Technology "
+            "This is a long listing page with navigation and many generic career links."
+        ),
+        metadata={
+            "status_code": 200,
+            "final_url": "https://group.bnpparibas/en/careers/all-job-offers/finance-accounts-and-management-control",
+        },
+    )
+    plan = SearchPlan(
+        target_roles=["Graduate Program"],
+        locations=["Sydney"],
+        company_types=["Bank"],
+        keywords=["BNP Paribas Sydney 2026 Graduate Programme"],
+    )
+
+    result = filter_pages([page], search_plan=plan, min_text_length=80)
+
+    assert result.accepted_pages == [page]
+    assert result.rejected_pages == []
+
+
+def test_page_filter_keeps_short_collectable_page() -> None:
+    page = PageContent(
+        url="https://job.xiaohongshu.com/campus/position/17071",
+        source_name="Xiaohongshu Campus Careers",
+        title="Xiaohongshu",
+        text="小红书",
+        metadata={"status_code": 200, "final_url": "https://job.xiaohongshu.com/campus/position/17071"},
+    )
+
+    result = filter_pages([page], min_text_length=300)
+
+    assert result.accepted_pages == [page]
+    assert result.rejected_pages == []
+
+
+def test_page_filter_rejects_redirected_error_page() -> None:
+    page = PageContent(
+        url="https://job-boards.greenhouse.io/letsgetchecked/jobs/4833407101",
+        source_name="LetsGetChecked Greenhouse",
+        title="Jobs at LetsGetChecked",
+        text="Jobs at LetsGetChecked. Search openings.",
+        metadata={
+            "status_code": 200,
+            "final_url": "https://job-boards.greenhouse.io/letsgetchecked?error=true",
+        },
+    )
+
+    result = filter_pages([page], min_text_length=30)
+
+    assert result.accepted_pages == []
+    assert any("redirected_to_error_page" in reason for reason in result.rejected_pages[0].reasons)
+
+
+def test_collect_pages_cli_filters_local_pages(capsys, tmp_path) -> None:
+    job_path = tmp_path / "job.html"
+    job_path.write_text(
+        """
+        <html>
+          <head><title>Data Analyst Graduate 2026</title></head>
+          <body>
+            <h1>Data Analyst Graduate 2026</h1>
+            <p>Graduate Program responsibilities requirements qualifications location apply.</p>
+            <p>Python SQL data analysis role for early careers candidates.</p>
+          </body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+    login_path = tmp_path / "login.html"
+    login_path.write_text(
+        "<html><head><title>Login</title></head><body>Please login or sign in to continue.</body></html>",
+        encoding="utf-8",
+    )
+    sources_path = tmp_path / "sources.json"
+    sources_path.write_text(
+        f"""
+        [
+          {{
+            "url": "{job_path.as_uri()}",
+            "title": "Data Analyst Graduate 2026",
+            "source_name": "Example Careers",
+            "company_name": "Example",
+            "company_type": "Technology",
+            "is_official": true,
+            "relevance_score": 95
+          }},
+          {{
+            "url": "{login_path.as_uri()}",
+            "title": "Login",
+            "source_name": "Example Careers",
+            "company_name": "Example",
+            "company_type": "Technology",
+            "is_official": true,
+            "relevance_score": 20
+          }}
+        ]
+        """,
+        encoding="utf-8",
+    )
+
+    exit_code = collect_pages_cli_main(
+        ["--sources-file", str(sources_path), "--min-text-length", "50", "--snippet-chars", "80"]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert '"accepted_count": 1' in captured.out
+    assert '"rejected_count": 1' in captured.out
+    assert "Data Analyst Graduate 2026" in captured.out
+    assert "auth_wall" in captured.out
 
 
 def test_rule_based_extractor_structures_job_detail_page(temp_db_path) -> None:
@@ -243,6 +685,73 @@ def test_manual_source_tool_pipeline_with_local_html(temp_db_path) -> None:
     assert result.inserted_count == 1
     assert agent_result is not None
     assert [event.tool_name for event in agent_result.tool_events] == ["web_search", "collect_page"]
+
+
+def test_build_ai_page_input_drops_search_metadata() -> None:
+    page = PageContent(
+        url="https://careers.example/job/123",
+        source_name="Example Careers",
+        title="Data Analyst Graduate",
+        text=" line one \n\n line two \n line three ",
+        metadata={
+            "final_url": "https://careers.example/job/123",
+            "company_name": "Example",
+            "company_type": "Technology",
+            "is_official": True,
+            "relevance_score": 95,
+            "reason": "Search result explanation.",
+            "links": [{"href": "https://careers.example/apply", "text": "Apply"}],
+        },
+    )
+
+    ai_input = build_ai_page_input(page, max_text_chars=17)
+    payload = ai_input.model_dump()
+
+    assert payload == {
+        "url": "https://careers.example/job/123",
+        "final_url": "https://careers.example/job/123",
+        "title": "Data Analyst Graduate",
+        "visible_text": "line one\nline two",
+    }
+
+
+def test_ai_job_extraction_client_prompts_with_minimal_page_input() -> None:
+    page = PageContent(
+        url="https://careers.example/job/123",
+        source_name="Example Careers",
+        title="Data Analyst Graduate",
+        text="Data Analyst Graduate responsibilities requirements location apply.",
+        metadata={
+            "final_url": "https://careers.example/job/123",
+            "company_name": "Example",
+            "company_type": "Technology",
+            "is_official": True,
+            "relevance_score": 95,
+            "reason": "Search result explanation.",
+        },
+    )
+    provider = MockAIProvider(
+        [
+            {
+                "company_name": "Example",
+                "title": "Data Analyst Graduate",
+                "source_url": "https://careers.example/job/123",
+                "source_name": "Example Careers",
+            }
+        ]
+    )
+
+    records = AIJobExtractionClient(provider, max_text_chars=200).extract_jobs_from_page(page)
+
+    assert records[0].title == "Data Analyst Graduate"
+    assert provider.prompts
+    prompt = provider.prompts[0]
+    input_payload = prompt.rsplit("Input:\n", maxsplit=1)[1]
+    assert "visible_text" in input_payload
+    assert "relevance_score" not in input_payload
+    assert "Search result explanation" not in input_payload
+    assert '"company_type": "Technology"' not in input_payload
+    assert '"is_official": true' not in input_payload
 
 
 def test_llm_job_extractor_uses_llm_client_interface(temp_db_path) -> None:

@@ -26,9 +26,9 @@ def load_skill(name: str, skills_dir: Path = SKILLS_DIR) -> SkillDocument:
     if not skill_path.exists():
         raise FileNotFoundError(f"Skill is not available: {name}")
     examples_path = skill_dir / "examples.md"
-    examples = examples_path.read_text(encoding="utf-8") if examples_path.exists() else ""
+    examples = examples_path.read_text(encoding="utf-8-sig") if examples_path.exists() else ""
     return SkillDocument(
         name=name,
-        instructions=skill_path.read_text(encoding="utf-8"),
+        instructions=skill_path.read_text(encoding="utf-8-sig"),
         examples=examples,
     )

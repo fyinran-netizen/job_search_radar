@@ -20,14 +20,17 @@ The long-term workflow should align with `docs/job_search_agent_full_flow.svg`: 
 
 The demo pipeline uses `DemoCsvTool` and `data/demo_jobs.csv`. Invalid single records must be reported without failing the whole run.
 
-The mock agent pipeline uses deterministic `ProfileCompletenessChecker`, deterministic `SearchPlanBuilder`, `ToolExecutor`, `MockWebSearchTool`, `MockPageTool`, `RuleBasedJobExtractor`, and `JobDiscoveryAgent`. It must not make network requests or call a real LLM API.
+The default/test mock agent pipeline uses deterministic `ProfileCompletenessChecker`, deterministic `SearchPlanBuilder`, `ToolExecutor`, `MockWebSearchTool`, `MockPageTool`, `RuleBasedJobExtractor`, and `JobDiscoveryAgent`. It must not make network requests or call a real LLM API.
+
+The Streamlit mock-agent entry may use `AutoSearchPlanBuilder` to generate only the `SearchPlan` through the active user's local Codex CLI login, then fall back to deterministic `SearchPlanBuilder` when Codex is unavailable. This must not replace tool execution guardrails or make real search/page requests in the mock path.
 
 The manual URL pipeline uses `ManualSourceTool`, `HttpPageTool`, `RuleBasedJobExtractor`, and `JobDiscoveryAgent`. It may fetch explicitly configured JD URLs from `config/sources.yaml` or `config/sources.example.yaml`, but it must not perform automatic search, broad crawling, Playwright automation, or LLM API calls in the current phase.
 
 Current code is the deterministic core and first tool-execution slice of the target SVG. Future work should add an orchestrator and structured AI decision models around this core, not bypass it.
 
 ## Target Agent Direction
-- AI should return Pydantic-validated JSON decisions such as `CandidateProfileDecision`, `CompletenessDecision`, `SearchStrategy`, `ToolPlan`, `JobUnderstanding`, `MatchAssessment`, and `ContinueDecision`.
+- AI should return Pydantic-validated JSON decisions such as `CandidateProfileDecision`, `SearchStrategy`, `ToolPlan`, `JobUnderstanding`, `MatchAssessment`, and `ContinueDecision`.
+- Profile completeness is a deterministic Python gate, not an AI decision. AI may extract candidate profile fields from files or user notes, but required-field sufficiency is checked by code before search strategy generation.
 - The orchestrator should validate each AI decision before executing tools or mutating state.
 - Tool calls should go through `ToolExecutor`.
 - `RuleBasedJobExtractor` is a current mock/fallback. Varied real pages should eventually use `LLMJobExtractor(real_client)` plus validation.
@@ -36,7 +39,7 @@ Current code is the deterministic core and first tool-execution slice of the tar
 ## Module Boundaries
 - `.agents/skills/`: prompt rules and examples for Codex-style AI tasks.
 - `agent/`: coordinate profile checks, search planning, tool calls, source selection, state, limits, and extraction.
-- `ai/tasks/`: business-specific AI decisions. Current implementations are deterministic fallbacks.
+- `ai/tasks/`: business-specific AI decisions. Keep AI-backed implementations optional and preserve deterministic fallbacks.
 - `ai/providers/`: provider adapters such as Codex CLI and mock provider. Providers must not contain job-search business logic.
 - `extractors/`: convert page text into `RawJobRecord` objects. Current runtime uses `RuleBasedJobExtractor`; future LLM extraction should plug in through `LLMJobExtractor`.
 - `tools/`: define tool interfaces, scheduling, mock external tools, manual source loading, and HTTP page collection.

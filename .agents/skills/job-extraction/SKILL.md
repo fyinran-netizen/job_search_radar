@@ -13,12 +13,14 @@ This skill maps varied job pages into `RawJobRecord` JSON. It should not normali
 
 ## Input
 
-- `PageContent.url`
-- `PageContent.source_name`
-- `PageContent.title`
-- Visible page text.
-- Optional HTML and link metadata.
-- Optional source metadata such as company name, company type, official flag.
+Use the minimal page payload only:
+
+- `url`
+- `final_url`
+- `title`
+- `visible_text`
+
+Do not require search-stage metadata such as relevance score, source-selection reason, company type, or official flag. Infer fields from the page text when possible and return `null` when the page does not support a field.
 
 ## Output
 

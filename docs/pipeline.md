@@ -74,12 +74,12 @@ The demo path reads local sample data from `data/demo_jobs.csv`.
 
 ## 2. Mock Agent Pipeline
 
-The mock agent path is the future AI-agent shape, but it does not call a real LLM and does not access the network.
+The mock agent path is the future AI-agent shape. In tests and default service construction it does not call a real LLM and does not access the network. In the Streamlit app, it may use the active user's local Codex CLI login to generate only the `SearchPlan`; mock search and mock page collection still do not make real web requests.
 
 It uses:
 
 - `ProfileCompletenessChecker`
-- `SearchPlanBuilder`
+- `AutoSearchPlanBuilder` / `SearchPlanBuilder`
 - `ToolExecutor`
 - `MockWebSearchTool`
 - `MockPageTool`
@@ -99,7 +99,8 @@ It uses:
             |
             v
 +-----------------------+
-| SearchPlanBuilder     |
+| AutoSearchPlanBuilder |
+| or SearchPlanBuilder  |
 | Build SearchPlan      |
 +-----------+-----------+
             |
@@ -210,7 +211,7 @@ AI returns CandidateProfile JSON
 Program validates and merges profile
         |
         v
-Profile completeness check
+Python profile completeness check
         |
         +-- Missing required information
         |       |
@@ -221,7 +222,7 @@ Profile completeness check
         |   User adds information
         |       |
         |       v
-        |   Profile completeness check again
+        |   Python profile completeness check again
         |
         +-- Information is enough
                 |
@@ -300,8 +301,8 @@ This is why the current project should avoid growing page-specific parsing rules
 | Step | Current implementation | Input | Output | Responsibility |
 | --- | --- | --- | --- | --- |
 | User profile | Example YAML | `profile.example.yaml` | `UserProfile` | Describe target roles, skills, company types, and locations. |
-| Profile check | `ProfileCompletenessChecker` | `UserProfile` | `ProfileCompletenessResult` | Decide whether enough information exists to search. |
-| Search plan | `SearchPlanBuilder` | `UserProfile` | `SearchPlan` | Generate target roles, locations, company types, and keywords. |
+| Profile check | `ProfileCompletenessChecker` | `UserProfile` | `ProfileCompletenessResult` | Deterministically check required fields before search. |
+| Search plan | `AutoSearchPlanBuilder` / `SearchPlanBuilder` | `UserProfile` | `SearchPlan` | Generate target roles, locations, company types, and keywords. Streamlit mock-agent runs try local Codex CLI first and fall back to deterministic rules. |
 | Mock web search | `MockWebSearchTool` | `SearchPlan` | `CandidateSource` list | Simulate finding candidate URLs. No network requests. |
 | Manual source URLs | `ManualSourceTool` | Configured sources | `CandidateSource` list | Return explicitly configured URLs for manual testing. |
 | Mock page collection | `MockPageTool` | `CandidateSource` | `PageContent` | Simulate fetching page text. No network requests. |
@@ -324,7 +325,6 @@ The SVG implies several AI return types. These should become Pydantic models bef
 | Decision model | Purpose | Must be validated before use |
 | --- | --- | --- |
 | `CandidateProfileDecision` | Extract education, graduation date, skills, projects, preferences, uncertain fields. | Required fields, date format, confidence, no private data leakage. |
-| `CompletenessDecision` | Decide whether profile is sufficient and what questions to ask. | `sufficient`, missing critical fields, user-facing questions. |
 | `SearchStrategy` | Generate role groups, queries, source priorities, exclusions, target count, max rounds. | Query length, allowed sources, target limits, privacy rules. |
 | `ToolPlan` | Choose tools and call order for one search round. | Tool names, args schema, domains, rate/budget limits. |
 | `JobUnderstanding` | Understand role type, campus eligibility, hard requirements, risks. | Valid role taxonomy, confidence, source evidence. |
@@ -339,7 +339,7 @@ The recommended migration order is:
 
 1. Add an `orchestrator/` layer that owns run state, round limits, and the fixed workflow.
 2. Add Pydantic models for `CandidateProfileDecision`, `SearchStrategy`, `ToolPlan`, `JobUnderstanding`, `MatchAssessment`, and `ContinueDecision`.
-3. Replace deterministic `SearchPlanBuilder` with an AI-backed task in `ai/tasks`, keeping validation and fallbacks.
+3. Expand `AutoSearchPlanBuilder` into a richer AI-backed search-strategy task while keeping validation and deterministic fallbacks.
 4. Replace `ManualSourceTool` / `MockWebSearchTool` with a real search tool behind the same `ToolExecutor`.
 5. Replace most rule-based page extraction with `LLMJobExtractor`, while keeping `RuleBasedJobExtractor` for mock pages and fallback.
 6. Add AI-backed job understanding and match assessment after normalization/deduplication.
@@ -451,7 +451,7 @@ Runs:
 
 ```text
 ProfileCompletenessChecker
--> SearchPlanBuilder
+-> AutoSearchPlanBuilder/SearchPlanBuilder
 -> ToolExecutor
 -> MockWebSearchTool
 -> MockPageTool

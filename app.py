@@ -17,7 +17,7 @@ def render_app() -> None:
     st.title("Job Radar")
     st.caption("Local job discovery and application tracking tool")
 
-    ingestion_service = IngestionService(DEFAULT_DB_PATH)
+    ingestion_service = IngestionService(db_path=DEFAULT_DB_PATH, enable_codex_ai=True)
     job_service = JobService(DEFAULT_DB_PATH)
 
     st.subheader("Demo Pipeline")

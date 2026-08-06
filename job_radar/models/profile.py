@@ -1,4 +1,4 @@
-"""User profile and matching-rule models."""
+"""User profile, completeness, and matching-rule models."""
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +12,14 @@ class UserProfile(BaseModel):
     skills: list[str] = Field(default_factory=list)
     preferred_company_types: list[str] = Field(default_factory=list)
     preferred_locations: list[str] = Field(default_factory=list)
+
+
+class ProfileCompletenessResult(BaseModel):
+    """Result of deterministic profile completeness validation."""
+
+    is_complete: bool
+    missing_fields: list[str] = Field(default_factory=list)
+    questions: list[str] = Field(default_factory=list)
 
 
 class MatchingRules(BaseModel):

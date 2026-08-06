@@ -5,7 +5,6 @@ job_search_radar/
 |-- .agents/
 |   `-- skills/
 |       |-- profile-builder/
-|       |-- profile-completeness/
 |       |-- search-strategy/
 |       |-- source-selection/
 |       |-- job-extraction/
@@ -52,7 +51,6 @@ job_search_radar/
 |   |   |   `-- mock.py
 |   |   `-- tasks/
 |   |       |-- __init__.py
-|   |       |-- profile_completeness.py
 |   |       `-- search_strategy.py
 |   |-- extractors/
 |   |   |-- __init__.py
@@ -74,6 +72,9 @@ job_search_radar/
 |   |   |-- deduplication.py
 |   |   |-- matching.py
 |   |   `-- runner.py
+|   |-- profile/
+|   |   |-- __init__.py
+|   |   `-- completeness.py
 |   |-- services/
 |   |   |-- __init__.py
 |   |   |-- ingestion_service.py
@@ -111,7 +112,9 @@ job_search_radar/
 
 `.agents/skills/` contains Codex-style skill instructions. These files define how AI should think and what JSON it should return. They are prompt assets, not Python business logic.
 
-`job_radar/ai/tasks/` contains AI-facing business tasks. Current tasks are deterministic fallbacks for profile completeness and search strategy. Future Codex-backed tasks should live here, not under `tools/`.
+`job_radar/ai/tasks/` contains AI-facing business tasks such as search strategy generation. `AutoSearchPlanBuilder` can use the local Codex CLI when the user is logged in, with deterministic fallback. Future Codex-backed tasks should live here, not under `tools/`.
+
+`job_radar/profile/` contains deterministic profile checks. Profile completeness is a Python required-field gate, not an AI decision.
 
 `job_radar/ai/providers/` contains low-level AI providers. `CodexCliProvider` only runs `codex exec` and parses JSON. It must not contain job-search business rules.
 

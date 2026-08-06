@@ -4,7 +4,7 @@ Job Radar is a local job discovery, matching, and application tracking tool. The
 
 This is not a complete web-wide recruitment crawler. The current focus is architecture, data pipeline behavior, and local job management.
 
-The long-term direction is the agent workflow in `docs/job_search_agent_full_flow.svg`: program-controlled orchestration, structured AI decisions, bounded tool execution, deterministic validation, and local persistence.
+The long-term direction is the agent workflow in `docs/job_search_agent_full_flow.svg`: program-controlled orchestration, structured AI decisions, bounded tool execution, deterministic validation, and local persistence. The SVG is a planning aid; this README is the source of truth for what is implemented today.
 
 ## Current Phase
 
@@ -17,9 +17,32 @@ Data Source -> Tool/Extractor -> Raw Job Records -> Validation -> Normalization
 
 The demo pipeline reads `data/demo_jobs.csv`, rejects invalid records, removes obvious duplicates, scores jobs against example YAML configuration, and saves results to SQLite.
 
-The project also includes a local mock agent pipeline. It keeps the future LLM and tool boundaries abstracted, but uses deterministic local mocks and rule-based extraction instead of a real LLM API.
+The project also includes a local agent-shaped pipeline. The first runnable version is intentionally chain-based rather than a fully dynamic graph: Python owns the order of operations, AI returns bounded structured outputs, and tools execute through `ToolExecutor`.
+
+The current chain is:
+
+```text
+UserProfile
+-> Python required-field completeness check
+-> AI or deterministic SearchPlan generation
+-> web_search
+-> collect_page
+-> Python hard-failure PageFilter
+-> AIPageInput trimming
+-> future AI job extraction
+-> Pydantic validation
+-> normalization / deduplication / matching / persistence
+```
+
+This is still agent-oriented because the project already separates AI decisions, tool execution, deterministic guardrails, and run state. It is not yet a free-form agent that lets AI choose arbitrary tools.
 
 There is also a manual URL pipeline for early page-structure testing. It reads explicit URLs from `config/sources.example.yaml` or private `config/sources.yaml`, fetches those pages with Python stdlib HTTP, extracts visible text, and converts simple JD detail pages into `RawJobRecord` objects before entering the existing pipeline.
+
+Profile completeness is intentionally checked by deterministic Python rules. Future AI profile extraction can populate candidate fields from resumes or user notes, but code decides whether required fields are present before search strategy generation.
+
+When the Streamlit app runs the mock agent search, it tries to generate the search plan through the local Codex CLI if `codex` is installed and logged in on the user's machine. That uses the active user's own Codex account. If Codex is unavailable or fails to return valid JSON, Job Radar falls back to the deterministic local search-plan builder.
+
+For command-line experiments, the project also has a Codex-backed `web_search` tool adapter. It is designed so a cloned project can use the current user's local Codex login and quota. If Codex is unavailable, mock data remains available for demos and tests.
 
 ## Completed Features
 
@@ -35,19 +58,24 @@ There is also a manual URL pipeline for early page-structure testing. It reads e
 - Streamlit UI for loading demo jobs, editing status/notes, and exporting CSV.
 - Mock agent workflow with mock web search, mock page collection, extractor-based structuring, and real Pipeline persistence.
 - Manual URL workflow with configured JD URLs, Python HTTP page collection, rule-based extraction, and real Pipeline persistence.
+- Deterministic profile completeness gate for required fields such as target roles, skills, and graduation year/date.
+- Optional Codex CLI-backed search strategy generation with deterministic fallback.
+- Codex CLI-backed `web_search` CLI slice for generating `CandidateSource` URLs from a static `SearchPlan`.
+- Python HTTP page collection and hard-failure page filtering before AI extraction.
+- `AIPageInput` trimming so AI job extraction receives only `url`, `final_url`, `title`, and cleaned visible text instead of search-stage metadata.
 - Extractor boundary for `PageContent -> RawJobRecord`, with a rule-based implementation now and an LLM adapter ready for future API integration.
 - pytest coverage for models, pipeline, repository, tools, agent flow, and app import.
 
 ## Not Implemented Yet
 
 - Real recruitment website crawling.
-- Real web search or automatic URL discovery.
+- Fully integrated real web search inside the Streamlit pipeline.
 - General-purpose crawling across recruitment websites.
-- Real LLM API calls.
-- Search engine integration.
+- Real LLM API calls outside local Codex CLI experiments.
+- Search engine integration outside the Codex-backed CLI adapter.
 - WeChat/public account collection.
-- Link verification.
-- LLM parsing or matching.
+- Full link verification and job-closed detection.
+- LLM parsing or matching in the main Streamlit pipeline.
 - Automatic applications.
 - Resume generation.
 - Cloud deployment, user login, Docker, or CI/CD.
@@ -99,9 +127,44 @@ The current runnable pipeline is the deterministic core of the future agent work
 The mock agent path runs before the same local pipeline:
 
 ```text
-ProfileCompletenessChecker -> SearchPlanBuilder -> ToolExecutor
+ProfileCompletenessChecker -> AutoSearchPlanBuilder/SearchPlanBuilder -> ToolExecutor
 -> mock web_search -> mock collect_page -> RuleBasedJobExtractor
 -> Validation -> Normalization -> Deduplication -> Matching -> SQLite
+```
+
+The experimental real-search CLI path is:
+
+```text
+SearchPlan JSON
+-> Codex-backed web_search
+-> CandidateSource[] JSON
+-> HttpPageTool collect_page
+-> PageFilter hard-failure screening
+-> AIPageInput trimming
+```
+
+The page filter is deliberately conservative. It rejects only obvious hard failures such as fetch errors, bad HTTP status codes, explicit error redirects, 404/not found pages, closed jobs, ended recruitment, or obvious login walls. It does not reject short pages, listing pages, or pages that merely lack obvious JD keywords; those are left for AI extraction and later validation.
+
+Before AI job extraction, `AIPageInput` removes search-stage fields such as `relevance_score`, source-selection `reason`, `company_type`, `is_official`, and link metadata. This reduces token usage and avoids biasing the extractor with earlier AI guesses.
+
+## Agentic Upgrade Path
+
+The current design can grow into a more agentic workflow without replacing the chain. The intended progression is:
+
+1. Keep the single-round chain fixed until search, page collection, extraction, validation, and persistence work end to end.
+2. Add real AI job extraction behind `LLMJobExtractor` using the existing `AIPageInput` boundary.
+3. Add run logging for `SearchPlan`, `CandidateSource`, page-filter decisions, token usage, and tool events.
+4. Add a narrow `search-review` / `ContinueDecision` step after one full round.
+5. Let AI propose the next bounded search round only after Python validates max rounds, budgets, privacy rules, duplicate queries, and allowed tools.
+6. Add AI `ToolPlan` later, only when there are multiple real search tools worth choosing between.
+
+The agent boundary is therefore:
+
+```text
+AI proposes structured decisions.
+Python validates decisions and controls the workflow.
+ToolExecutor executes only allowed tools.
+Pipeline code validates, normalizes, deduplicates, persists, and protects user state.
 ```
 
 The manual URL path also feeds the same local pipeline:
@@ -129,8 +192,28 @@ On first startup, the app initializes the local SQLite database automatically.
 The UI has three ingestion buttons:
 
 - `Load demo jobs`: reads `data/demo_jobs.csv`.
-- `Run mock agent search`: runs the abstract LLM/tool workflow with local mock data.
+- `Run mock agent search`: generates a search plan with local Codex CLI when available, then runs the abstract tool workflow with local mock search/page data.
 - `Fetch manual source URL`: fetches explicitly configured JD URLs and runs the same local pipeline.
+
+## CLI Experiments
+
+Generate a search strategy:
+
+```bash
+uv run python -m job_radar.cli.search_strategy --provider codex --show-meta
+```
+
+Run web search from a static plan:
+
+```bash
+uv run python -m job_radar.cli.web_search --provider codex --plan-file .test_tmp/search_plan_example.json --max-sources 5
+```
+
+Collect pages and run hard-failure filtering:
+
+```bash
+uv run python -m job_radar.cli.collect_pages --sources-file .test_tmp/candidate_sources_example.json --plan-file .test_tmp/search_plan_example.json --timeout-seconds 15 --snippet-chars 500
+```
 
 ## Run Tests
 

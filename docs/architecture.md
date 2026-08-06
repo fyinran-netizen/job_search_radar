@@ -17,8 +17,8 @@ The current code should be viewed as the first working slice of that target syst
 
 ```mermaid
 flowchart TD
-    Profile[UserProfile YAML] --> Check[ai/tasks ProfileCompletenessChecker]
-    Check --> Plan[ai/tasks SearchPlanBuilder]
+    Profile[UserProfile YAML] --> Check[profile/completeness ProfileCompletenessChecker]
+    Check --> Plan[ai/tasks AutoSearchPlanBuilder or SearchPlanBuilder]
     Plan --> Executor[ToolExecutor]
     Executor --> Search[tools/functions MockWebSearchTool]
     Search --> Sources[CandidateSource URLs]
@@ -79,8 +79,8 @@ AI returns MatchAssessment
 | --- | --- | --- |
 | User input and file handling | Upload resume, parse PDF/DOCX, accept free-form preferences. | Not implemented. Current profile comes from YAML. |
 | User profile extraction | AI extracts `CandidateProfile` from resume and text. | Not implemented. `UserProfile` is loaded from YAML. |
-| Profile completeness | AI decides whether missing information blocks search. | Deterministic `ProfileCompletenessChecker` checks required fields. |
-| Search strategy | AI generates role groups, queries, source priorities, stop conditions. | Deterministic `SearchPlanBuilder` creates simple keywords. |
+| Profile completeness | Program checks required fields before search strategy generation. | Deterministic `ProfileCompletenessChecker` checks required fields outside AI tasks. |
+| Search strategy | AI generates role groups, queries, source priorities, stop conditions. | Streamlit mock-agent runs can use local Codex CLI through `AutoSearchPlanBuilder`; deterministic `SearchPlanBuilder` remains the fallback. |
 | Tool planning | AI returns a validated `ToolPlan`. | Not implemented. Current executor is called in fixed order. |
 | Search tools | `web_search`, company career search, API/MCP tools. | `MockWebSearchTool` and `ManualSourceTool`. |
 | Page collection | Fetch URL, browser/site adapter if needed, return `PageContent`. | `MockPageTool` and `HttpPageTool`. |
@@ -91,7 +91,7 @@ AI returns MatchAssessment
 | Continue decision | AI decides whether to search another round within limits. | Not implemented. |
 | Persistence/UI/feedback | Save jobs, scores, run logs, user feedback. | SQLite jobs, status/notes, Streamlit table/export. |
 
-This means the next major architecture step is not adding many page-specific `if/else` branches. The next step is introducing an explicit orchestrator and structured AI decision models while keeping the current pipeline as the deterministic safety layer.
+This means the next major architecture step is not adding many page-specific `if/else` branches. The next step is introducing an explicit orchestrator and structured AI decision models while keeping profile completeness, pipeline validation, and persistence as deterministic safety layers.
 
 ## Dependencies
 
@@ -116,7 +116,7 @@ This keeps UI, workflow control, tools, deterministic processing, and storage se
 - Pydantic gives explicit raw and processed job models.
 - PyYAML keeps profile and matching rules outside business code.
 - pytest verifies the pipeline and repository without using the real database.
-- The mock agent path uses mock web tools and deterministic rule-based extraction so tool scheduling can be tested without network access.
+- The mock agent path uses mock web tools and deterministic rule-based extraction so tool scheduling can be tested without network access. In the Streamlit app, search-plan generation can use the active user's local Codex CLI login before falling back to deterministic rules.
 - The manual URL path can fetch explicitly configured JD URLs with Python stdlib HTTP collection, but it does not discover URLs automatically.
 
 ## Agent And Tool Layer
@@ -125,7 +125,7 @@ The current agent implementation is a local skeleton for the SVG's agent/tool ph
 
 ```text
 ProfileCompletenessChecker
--> SearchPlanBuilder
+-> AutoSearchPlanBuilder/SearchPlanBuilder
 -> ToolExecutor web_search
 -> ToolExecutor collect_page
 -> RuleBasedJobExtractor
@@ -148,7 +148,7 @@ The future agent flow should add these explicit decision boundaries:
 
 ```text
 CandidateProfileDecision
--> CompletenessDecision
+-> Python ProfileCompletenessChecker
 -> SearchStrategy
 -> ToolPlan
 -> RawSearchResult[]
@@ -159,7 +159,7 @@ CandidateProfileDecision
 -> ContinueDecision
 ```
 
-Each item should be a Pydantic model. AI may propose values, but code validates and applies them.
+Each AI-produced item should be a Pydantic model. AI may propose values, but code validates and applies them. Profile completeness is not AI-produced; Python required-field rules decide whether the workflow can continue.
 
 ## Adding Real Tools Later
 

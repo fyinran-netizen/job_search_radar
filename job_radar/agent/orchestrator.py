@@ -1,14 +1,14 @@
 """Agent workflow for discovering job records through tools."""
 
 from job_radar.agent.guardrails import select_candidate_sources
-from job_radar.ai.tasks.profile_completeness import ProfileCompletenessChecker
-from job_radar.ai.tasks.search_strategy import SearchPlanBuilder
+from job_radar.ai.tasks.search_strategy import SearchPlanBuilder, SearchPlanBuilderProtocol
 from job_radar.extractors.base import JobExtractor
 from job_radar.models.decisions import AgentRunResult
 from job_radar.models.job import RawJobRecord
 from job_radar.models.profile import UserProfile
 from job_radar.models.run import AgentLimits
 from job_radar.models.search import CandidateSource
+from job_radar.profile.completeness import ProfileCompletenessChecker
 from job_radar.tools.executor import ToolExecutor
 
 
@@ -20,7 +20,7 @@ class JobDiscoveryAgent:
         job_extractor: JobExtractor,
         tool_executor: ToolExecutor,
         profile_checker: ProfileCompletenessChecker | None = None,
-        search_plan_builder: SearchPlanBuilder | None = None,
+        search_plan_builder: SearchPlanBuilderProtocol | None = None,
         limits: AgentLimits | None = None,
     ) -> None:
         self.job_extractor = job_extractor
@@ -40,6 +40,8 @@ class JobDiscoveryAgent:
 
         search_plan = self.search_plan_builder.build(profile)
         result.search_plan = search_plan
+        result.search_plan_source = self.search_plan_builder.last_source
+        result.search_plan_error = self.search_plan_builder.last_error
 
         candidate_sources = self.tool_executor.run("web_search", search_plan)
         if not isinstance(candidate_sources, list):

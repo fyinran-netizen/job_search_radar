@@ -89,7 +89,7 @@ class HttpPageTool(BaseTool):
         """Fetch HTML for a candidate source and convert it to page content."""
 
         source = payload if isinstance(payload, CandidateSource) else CandidateSource.model_validate(payload)
-        html = self._read_url(source.url)
+        html, response_metadata = self._read_url(source.url)
         parser = _HTMLTextParser()
         parser.feed(html)
         parser.close()
@@ -101,6 +101,7 @@ class HttpPageTool(BaseTool):
             text=parser.text,
             html=html,
             metadata={
+                **response_metadata,
                 "company_name": source.company_name,
                 "company_type": source.company_type,
                 "is_official": source.is_official,
@@ -111,10 +112,14 @@ class HttpPageTool(BaseTool):
             },
         )
 
-    def _read_url(self, url: str) -> str:
+    def _read_url(self, url: str) -> tuple[str, dict[str, Any]]:
         parsed = urlparse(url)
         if parsed.scheme == "file":
-            return Path(url2pathname(parsed.path)).read_text(encoding="utf-8")
+            return Path(url2pathname(parsed.path)).read_text(encoding="utf-8"), {
+                "status_code": 200,
+                "final_url": url,
+                "content_type": "text/html; charset=utf-8",
+            }
         request = Request(
             url,
             headers={
@@ -125,8 +130,14 @@ class HttpPageTool(BaseTool):
         with urlopen(request, timeout=self.timeout_seconds) as response:
             raw = response.read()
             content_type = response.headers.get("Content-Type", "")
+            status_code = getattr(response, "status", None)
+            final_url = response.geturl()
         encoding = self._detect_encoding(content_type, raw)
-        return raw.decode(encoding, errors="replace")
+        return raw.decode(encoding, errors="replace"), {
+            "status_code": status_code,
+            "final_url": final_url,
+            "content_type": content_type,
+        }
 
     @staticmethod
     def _detect_encoding(content_type: str, raw: bytes) -> str:
