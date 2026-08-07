@@ -1,6 +1,12 @@
 """AI-facing tasks."""
 
-from job_radar.ai.tasks.job_extraction import AIJobExtractionClient, AIPageInput, build_ai_page_input
+from job_radar.ai.tasks.job_extraction import (
+    AIJobExtractionClient,
+    AIPageInput,
+    ImportantLink,
+    build_ai_page_input,
+    extract_important_links,
+)
 from job_radar.ai.tasks.search_strategy import (
     AISearchPlanBuilder,
     AutoSearchPlanBuilder,
@@ -13,7 +19,9 @@ __all__ = [
     "AIPageInput",
     "AISearchPlanBuilder",
     "AutoSearchPlanBuilder",
+    "ImportantLink",
     "SearchPlanBuilder",
     "build_ai_page_input",
     "create_search_plan_builder",
+    "extract_important_links",
 ]

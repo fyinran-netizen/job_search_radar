@@ -69,10 +69,23 @@ class RejectedPage(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
 
+class PendingPage(BaseModel):
+    """A candidate page that may be useful but needs another collection method."""
+
+    url: str
+    source_name: str
+    title: str
+    reasons: list[str] = Field(default_factory=list)
+    text_length: int = 0
+    metadata: dict = Field(default_factory=dict)
+    page: PageContent | None = None
+
+
 class PageFilterResult(BaseModel):
-    """Accepted pages and rejected pages with reasons."""
+    """Accepted, pending, and rejected pages with reasons."""
 
     accepted_pages: list[PageContent] = Field(default_factory=list)
+    pending_pages: list[PendingPage] = Field(default_factory=list)
     rejected_pages: list[RejectedPage] = Field(default_factory=list)
 
 
@@ -81,7 +94,7 @@ def filter_pages(
     search_plan: SearchPlan | None = None,
     min_text_length: int = 300,
 ) -> PageFilterResult:
-    """Reject pages that are clearly not worth sending to AI extraction."""
+    """Classify collected pages before AI extraction."""
 
     result = PageFilterResult()
     for page in pages:
@@ -95,6 +108,20 @@ def filter_pages(
                     reasons=reasons,
                     text_length=len(page.text),
                     metadata=page.metadata,
+                )
+            )
+            continue
+        pending = pending_reasons(page, search_plan=search_plan, min_text_length=min_text_length)
+        if pending:
+            result.pending_pages.append(
+                PendingPage(
+                    url=page.url,
+                    source_name=page.source_name,
+                    title=page.title,
+                    reasons=pending,
+                    text_length=len(page.text),
+                    metadata=page.metadata,
+                    page=page,
                 )
             )
             continue
@@ -134,6 +161,28 @@ def rejection_reasons(
         matched_auth_keywords = _matches(text, AUTH_PAGE_KEYWORDS)
         reasons.append(f"auth_wall: {', '.join(matched_auth_keywords[:5])}")
 
+    return reasons
+
+
+def pending_reasons(
+    page: PageContent,
+    search_plan: SearchPlan | None = None,
+    min_text_length: int = 300,
+) -> list[str]:
+    """Return reasons for pages that should be kept but not extracted yet."""
+
+    text_length = len(page.text.strip())
+    if text_length >= min_text_length:
+        return []
+
+    reasons = [f"insufficient_visible_text: {text_length} < {min_text_length}"]
+    signals = summarize_page_signals(page, search_plan)
+    if signals["jd_signals"] or signals["plan_signals"]:
+        reasons.append("candidate_signal_present")
+    if len(page.html) > 1000 and text_length <= 30:
+        reasons.append("likely_javascript_rendered_or_hidden_content")
+    else:
+        reasons.append("needs_manual_review")
     return reasons
 
 

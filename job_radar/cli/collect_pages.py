@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
 from job_radar.models.search import CandidateSource, SearchPlan
 from job_radar.models.tool import PageContent
-from job_radar.pipeline.page_filter import RejectedPage, filter_pages, summarize_page_signals
+from job_radar.pipeline.page_filter import PendingPage, RejectedPage, filter_pages, summarize_page_signals
 from job_radar.tools.functions.http_page import HttpPageTool
 
 
@@ -23,6 +25,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-text-length", type=int, default=300)
     parser.add_argument("--timeout-seconds", type=int, default=20)
     parser.add_argument("--snippet-chars", type=int, default=500)
+    parser.add_argument(
+        "--output-pages-file",
+        help="Optional path to write accepted PageContent[] with full text, html, and metadata.",
+    )
+    parser.add_argument(
+        "--output-pending-file",
+        help="Optional path to write pending pages that need another collection method.",
+    )
+    parser.add_argument(
+        "--output-report-file",
+        help="Optional path to write the same filter summary printed to stdout.",
+    )
+    parser.add_argument(
+        "--output-run-dir",
+        help=(
+            "Optional artifact directory. Overwrites accepted_pages.json, pending_pages.json, "
+            "and page_collection_report.json in that directory."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -34,28 +55,85 @@ def main(argv: list[str] | None = None) -> int:
 
     tool = HttpPageTool(timeout_seconds=args.timeout_seconds)
     pages: list[PageContent] = []
+    pending_fetches: list[PendingPage] = []
     rejected_fetches: list[RejectedPage] = []
     for source in sources:
         try:
             pages.append(tool.run(source))
         except Exception as exc:
-            rejected_fetches.append(
-                RejectedPage(
-                    url=source.url,
-                    source_name=source.source_name,
-                    title=source.title,
-                    reasons=[f"fetch_error: {exc}"],
-                    metadata={
-                        "company_name": source.company_name,
-                        "company_type": source.company_type,
-                        "is_official": source.is_official,
-                    },
+            if _is_pending_fetch_error(exc):
+                pending_fetches.append(
+                    PendingPage(
+                        url=source.url,
+                        source_name=source.source_name,
+                        title=source.title,
+                        reasons=[f"fetch_error: {exc}"],
+                        metadata={
+                            "company_name": source.company_name,
+                            "company_type": source.company_type,
+                            "is_official": source.is_official,
+                        },
+                    )
                 )
-            )
+            else:
+                rejected_fetches.append(
+                    RejectedPage(
+                        url=source.url,
+                        source_name=source.source_name,
+                        title=source.title,
+                        reasons=[f"fetch_error: {exc}"],
+                        metadata={
+                            "company_name": source.company_name,
+                            "company_type": source.company_type,
+                            "is_official": source.is_official,
+                        },
+                    )
+                )
 
     result = filter_pages(pages, search_plan=plan, min_text_length=args.min_text_length)
+    result.pending_pages.extend(pending_fetches)
     result.rejected_pages.extend(rejected_fetches)
-    print(json.dumps(_summarize_result(result, plan, args.snippet_chars), ensure_ascii=False, indent=2))
+    summary = _summarize_result(result, plan, args.snippet_chars)
+    summary["collected_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    output_pages_file = args.output_pages_file
+    output_pending_file = args.output_pending_file
+    output_report_file = args.output_report_file
+    try:
+        run_dir = Path(args.output_run_dir) if args.output_run_dir else None
+        if run_dir:
+            output_pages_file = output_pages_file or str(run_dir / "accepted_pages.json")
+            output_pending_file = output_pending_file or str(run_dir / "pending_pages.json")
+            output_report_file = output_report_file or str(run_dir / "page_collection_report.json")
+            summary["artifacts"] = {"run_dir": str(run_dir)}
+        if output_pages_file:
+            _write_json(
+                output_pages_file,
+                [page.model_dump() for page in result.accepted_pages],
+            )
+        if output_pending_file:
+            _write_json(
+                output_pending_file,
+                [page.model_dump() for page in result.pending_pages],
+            )
+        if output_report_file:
+            summary.setdefault("artifacts", {})
+            summary["artifacts"].update(
+                {
+                    key: value
+                    for key, value in {
+                        "accepted_pages_file": output_pages_file,
+                        "pending_pages_file": output_pending_file,
+                        "report_file": output_report_file,
+                    }.items()
+                    if value
+                }
+            )
+            _write_json(output_report_file, summary)
+    except OSError as exc:
+        print(f"Failed to write output file: {exc}", file=sys.stderr)
+        return 4
+
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -69,9 +147,32 @@ def _load_plan(path: str) -> SearchPlan:
         return SearchPlan.model_validate(json.load(file))
 
 
+def _write_json(path: str, payload: object) -> None:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _is_pending_fetch_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in [
+            "403",
+            "forbidden",
+            "429",
+            "too many requests",
+            "timed out",
+            "timeout",
+            "winerror 10013",
+        ]
+    )
+
+
 def _summarize_result(result, plan: SearchPlan | None, snippet_chars: int) -> dict:
     return {
         "accepted_count": len(result.accepted_pages),
+        "pending_count": len(result.pending_pages),
         "rejected_count": len(result.rejected_pages),
         "accepted_pages": [
             {
@@ -85,6 +186,24 @@ def _summarize_result(result, plan: SearchPlan | None, snippet_chars: int) -> di
                 "snippet": page.text[:snippet_chars],
             }
             for page in result.accepted_pages
+        ],
+        "pending_pages": [
+            {
+                "url": page.url,
+                "final_url": page.metadata.get("final_url"),
+                "status_code": page.metadata.get("status_code"),
+                "source_name": page.source_name,
+                "title": page.title,
+                "text_length": page.text_length,
+                "reasons": page.reasons,
+                "signals": (
+                    summarize_page_signals(page.page, plan)
+                    if page.page
+                    else {"jd_signals": [], "plan_signals": []}
+                ),
+                "snippet": page.page.text[:snippet_chars] if page.page else "",
+            }
+            for page in result.pending_pages
         ],
         "rejected_pages": [
             {

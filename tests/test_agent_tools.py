@@ -1,13 +1,23 @@
+import json
+
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
 from job_radar.agent.orchestrator import JobDiscoveryAgent
+from job_radar.cli.clean_pages import main as clean_pages_cli_main
 from job_radar.cli.collect_pages import main as collect_pages_cli_main
 from job_radar.cli.search_strategy import main as search_strategy_cli_main
 from job_radar.cli.web_search import main as web_search_cli_main
 from job_radar.ai.providers.codex_cli import CodexCliDebugInfo, CodexCliProvider
 from job_radar.ai.providers.mock import MockAIProvider
 from job_radar.ai.structured_output import validate_model
-from job_radar.ai.tasks.job_extraction import AIJobExtractionClient, build_ai_page_input
+from job_radar.ai.tasks.job_extraction import (
+    AIJobExtractionClient,
+    AIPageInput,
+    ImportantLink,
+    build_ai_page_input,
+    extract_important_links,
+)
 from job_radar.ai.tasks.search_strategy import AISearchPlanBuilder, AutoSearchPlanBuilder, SearchPlanBuilder
 from job_radar.config import load_candidate_sources, load_matching_rules, load_profile
 from job_radar.extractors.llm import LLMJobExtractor, UnconfiguredLLMJobExtractor
@@ -16,6 +26,7 @@ from job_radar.models.job import RawJobRecord
 from job_radar.models.search import CandidateSource, SearchPlan
 from job_radar.models.profile import UserProfile
 from job_radar.models.tool import PageContent
+from job_radar.pipeline.page_cleaning import clean_page_text, clean_visible_text
 from job_radar.pipeline.page_filter import filter_pages
 from job_radar.pipeline.runner import PipelineRunner
 from job_radar.profile.completeness import ProfileCompletenessChecker
@@ -495,7 +506,7 @@ def test_page_filter_keeps_redirected_detail_to_listing_page() -> None:
     assert result.rejected_pages == []
 
 
-def test_page_filter_keeps_short_collectable_page() -> None:
+def test_page_filter_marks_short_collectable_page_pending() -> None:
     page = PageContent(
         url="https://job.xiaohongshu.com/campus/position/17071",
         source_name="Xiaohongshu Campus Careers",
@@ -506,7 +517,9 @@ def test_page_filter_keeps_short_collectable_page() -> None:
 
     result = filter_pages([page], min_text_length=300)
 
-    assert result.accepted_pages == [page]
+    assert result.accepted_pages == []
+    assert result.pending_pages[0].url == page.url
+    assert any("insufficient_visible_text" in reason for reason in result.pending_pages[0].reasons)
     assert result.rejected_pages == []
 
 
@@ -549,6 +562,7 @@ def test_collect_pages_cli_filters_local_pages(capsys, tmp_path) -> None:
         encoding="utf-8",
     )
     sources_path = tmp_path / "sources.json"
+    pages_path = tmp_path / "accepted_pages.json"
     sources_path.write_text(
         f"""
         [
@@ -576,16 +590,99 @@ def test_collect_pages_cli_filters_local_pages(capsys, tmp_path) -> None:
     )
 
     exit_code = collect_pages_cli_main(
-        ["--sources-file", str(sources_path), "--min-text-length", "50", "--snippet-chars", "80"]
+        [
+            "--sources-file",
+            str(sources_path),
+            "--min-text-length",
+            "50",
+            "--snippet-chars",
+            "20",
+            "--output-pages-file",
+            str(pages_path),
+        ]
     )
 
     captured = capsys.readouterr()
+    saved_pages = json.loads(pages_path.read_text(encoding="utf-8"))
 
     assert exit_code == 0
     assert '"accepted_count": 1' in captured.out
+    assert '"pending_count": 0' in captured.out
     assert '"rejected_count": 1' in captured.out
     assert "Data Analyst Graduate 2026" in captured.out
     assert "auth_wall" in captured.out
+    assert len(saved_pages) == 1
+    assert saved_pages[0]["url"] == job_path.as_uri()
+    assert "Python SQL data analysis role for early careers candidates." in saved_pages[0]["text"]
+    assert "<html>" in saved_pages[0]["html"]
+
+
+def test_collect_pages_cli_overwrites_run_artifacts(capsys, tmp_path) -> None:
+    job_path = tmp_path / "job.html"
+    job_path.write_text(
+        """
+        <html>
+          <head><title>Business Analyst Graduate 2026</title></head>
+          <body>
+            <h1>Business Analyst Graduate 2026</h1>
+            <p>Graduate Program responsibilities requirements qualifications location apply.</p>
+            <p>SQL dashboards and stakeholder analysis for early careers candidates.</p>
+          </body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+    sources_path = tmp_path / "sources.json"
+    sources_path.write_text(
+        f"""
+        [
+          {{
+            "url": "{job_path.as_uri()}",
+            "title": "Business Analyst Graduate 2026",
+            "source_name": "Example Careers",
+            "company_name": "Example",
+            "company_type": "Technology",
+            "is_official": true,
+            "relevance_score": 95
+          }}
+        ]
+        """,
+        encoding="utf-8",
+    )
+    runs_dir = tmp_path / "page_runs"
+
+    exit_code = collect_pages_cli_main(
+        [
+            "--sources-file",
+            str(sources_path),
+            "--min-text-length",
+            "50",
+            "--output-run-dir",
+            str(runs_dir),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    pages_path = runs_dir / "accepted_pages.json"
+    pending_path = runs_dir / "pending_pages.json"
+    report_path = runs_dir / "page_collection_report.json"
+    saved_pages = TypeAdapter(list[PageContent]).validate_python(
+        json.loads(pages_path.read_text(encoding="utf-8"))
+    )
+    saved_report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert [path for path in runs_dir.iterdir() if path.is_dir()] == []
+    assert pages_path.exists()
+    assert pending_path.exists()
+    assert report_path.exists()
+    assert len(saved_pages) == 1
+    assert saved_pages[0].title == "Business Analyst Graduate 2026"
+    assert saved_report["collected_at"]
+    assert saved_report["artifacts"]["run_dir"] == str(runs_dir)
+    assert saved_report["artifacts"]["accepted_pages_file"] == str(pages_path)
+    assert saved_report["artifacts"]["pending_pages_file"] == str(pending_path)
+    assert "accepted_pages_file" in captured.out
 
 
 def test_rule_based_extractor_structures_job_detail_page(temp_db_path) -> None:
@@ -700,7 +797,10 @@ def test_build_ai_page_input_drops_search_metadata() -> None:
             "is_official": True,
             "relevance_score": 95,
             "reason": "Search result explanation.",
-            "links": [{"href": "https://careers.example/apply", "text": "Apply"}],
+            "links": [
+                {"href": "https://careers.example/apply", "text": "Apply"},
+                {"href": "https://careers.example/about", "text": "About us"},
+            ],
         },
     )
 
@@ -712,7 +812,159 @@ def test_build_ai_page_input_drops_search_metadata() -> None:
         "final_url": "https://careers.example/job/123",
         "title": "Data Analyst Graduate",
         "visible_text": "line one\nline two",
+        "important_links": [
+            {
+                "url": "https://careers.example/apply",
+                "text": "Apply",
+                "kind": "apply",
+                "reason": "apply_signal",
+            }
+        ],
     }
+
+
+def test_extract_important_links_keeps_attachments_and_apply_links() -> None:
+    page = PageContent(
+        url="https://www.boc.cn/aboutboc/bi4/202603/t20260311_25654053.html",
+        source_name="Bank of China",
+        title="Bank of China 2026 Spring Recruitment Notice",
+        text="Recruitment notice",
+        metadata={
+            "links": [
+                {
+                    "href": "https://pic.bankofchina.com/bocappd/appform/202603/P020260311360231598031.pdf",
+                    "text": "Attachment",
+                },
+                {"href": "https://careers.example/apply", "text": "Apply now"},
+                {"href": "https://careers.example/about", "text": "About"},
+            ]
+        },
+    )
+
+    links = extract_important_links(page)
+
+    assert [link.kind for link in links] == ["attachment", "apply"]
+    assert links[0].url.endswith(".pdf")
+
+
+def test_important_link_rejects_unknown_kind() -> None:
+    with pytest.raises(ValidationError):
+        ImportantLink(url="https://careers.example/file.pdf", kind="download")
+
+
+def test_clean_visible_text_removes_obvious_boilerplate_but_keeps_job_details() -> None:
+    cleaned = clean_visible_text(
+        """
+        首页
+        学生
+        Data Analyst Graduate 2026
+        岗位职责
+        Build SQL dashboards and analyze product metrics.
+        任职要求
+        Python SQL statistics.
+        温馨提示：抵制招聘诈骗，加强自我保护。
+        联系我们
+        """,
+        max_text_chars=500,
+    )
+
+    assert "首页" not in cleaned.text
+    assert "联系我们" not in cleaned.text
+    assert "抵制招聘诈骗" not in cleaned.text
+    assert "Data Analyst Graduate 2026" in cleaned.text
+    assert "Python SQL statistics" in cleaned.text
+    assert cleaned.removed_line_count >= 3
+
+
+def test_clean_page_text_prefers_trafilatura_html() -> None:
+    cleaned = clean_page_text(
+        """
+        <html>
+          <body>
+            <nav>Home Login Contact</nav>
+            <main>
+              <h1>Data Analyst Graduate 2026</h1>
+              <p>Responsibilities include SQL dashboards and product metrics.</p>
+              <p>Requirements include Python, SQL, and statistics.</p>
+            </main>
+          </body>
+        </html>
+        """,
+        fallback_text="Home\nLogin\nBad fallback text",
+        url="https://careers.example/job/123",
+        min_extracted_chars=40,
+    )
+
+    assert cleaned.method == "trafilatura"
+    assert "Responsibilities include SQL dashboards" in cleaned.text
+    assert "Bad fallback text" not in cleaned.text
+
+
+def test_clean_pages_cli_writes_ai_page_inputs(capsys, tmp_path) -> None:
+    pages_path = tmp_path / "accepted_pages.json"
+    output_path = tmp_path / "cleaned_pages.json"
+    report_path = tmp_path / "cleaning_report.json"
+    pages_path.write_text(
+        json.dumps(
+            [
+                {
+                    "url": "https://careers.example/job/123",
+                    "source_name": "Example Careers",
+                    "title": "Data Analyst Graduate",
+                    "text": (
+                        "首页\n学生\nData Analyst Graduate\n岗位职责\nAnalyze metrics.\n"
+                        "任职要求\nPython SQL.\n联系我们"
+                    ),
+                    "html": (
+                        "<html><body><main><h1>Data Analyst Graduate</h1>"
+                        "<p>Analyze metrics.</p><p>Python SQL.</p></main></body></html>"
+                    ),
+                    "metadata": {
+                        "final_url": "https://careers.example/job/123",
+                        "relevance_score": 95,
+                        "links": [
+                            {"href": "https://careers.example/job-description.pdf", "text": "PDF"},
+                            {"href": "https://careers.example/about", "text": "About"},
+                        ],
+                    },
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = clean_pages_cli_main(
+        [
+            "--pages-file",
+            str(pages_path),
+            "--output-file",
+            str(output_path),
+            "--report-file",
+            str(report_path),
+            "--max-text-chars",
+            "200",
+            "--min-extracted-chars",
+            "20",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    cleaned_inputs = TypeAdapter(list[AIPageInput]).validate_python(
+        json.loads(output_path.read_text(encoding="utf-8"))
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert len(cleaned_inputs) == 1
+    assert cleaned_inputs[0].url == "https://careers.example/job/123"
+    assert "Analyze metrics" in cleaned_inputs[0].visible_text
+    assert cleaned_inputs[0].important_links[0].kind == "attachment"
+    assert "首页" not in cleaned_inputs[0].visible_text
+    assert "relevance_score" not in output_path.read_text(encoding="utf-8")
+    assert report["page_count"] == 1
+    assert report["pages"][0]["method"] == "trafilatura"
+    assert report["pages"][0]["important_link_count"] == 1
+    assert "cleaned_at" in captured.out
 
 
 def test_ai_job_extraction_client_prompts_with_minimal_page_input() -> None:

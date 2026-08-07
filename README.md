@@ -177,14 +177,28 @@ ManualSourceTool -> HttpPageTool -> RuleBasedJobExtractor
 
 ## Installation
 
+On Windows, use the project-local uv wrapper to keep uv cache, uv-managed Python installs, and temp files under `.local_tmp/` instead of the user profile on `C:`.
+
+```powershell
+.\scripts\uv-local.ps1 sync
+```
+
+If an older `.venv` points to a missing uv-managed Python under the user profile, rebuild it inside the project:
+
+```powershell
+.\scripts\uv-local.ps1 sync --python 3.13.13 --reinstall
+```
+
+On other systems, either set the same environment variables or run uv directly:
+
 ```bash
-uv sync
+UV_CACHE_DIR=.local_tmp/uv-cache UV_PYTHON_INSTALL_DIR=.local_tmp/uv-python uv sync
 ```
 
 ## Start The App
 
-```bash
-uv run streamlit run app.py
+```powershell
+.\scripts\uv-local.ps1 run streamlit run app.py
 ```
 
 On first startup, the app initializes the local SQLite database automatically.
@@ -199,26 +213,36 @@ The UI has three ingestion buttons:
 
 Generate a search strategy:
 
-```bash
-uv run python -m job_radar.cli.search_strategy --provider codex --show-meta
+```powershell
+.\scripts\uv-local.ps1 run python -m job_radar.cli.search_strategy --provider codex --show-meta
 ```
 
 Run web search from a static plan:
 
-```bash
-uv run python -m job_radar.cli.web_search --provider codex --plan-file .test_tmp/search_plan_example.json --max-sources 5
+```powershell
+.\scripts\uv-local.ps1 run python -m job_radar.cli.web_search --provider codex --plan-file .test_tmp/search_plan_example.json --max-sources 5
 ```
 
 Collect pages and run hard-failure filtering:
 
-```bash
-uv run python -m job_radar.cli.collect_pages --sources-file .test_tmp/candidate_sources_example.json --plan-file .test_tmp/search_plan_example.json --timeout-seconds 15 --snippet-chars 500
+```powershell
+.\scripts\uv-local.ps1 run python -m job_radar.cli.collect_pages --sources-file .test_tmp/candidate_sources_example.json --plan-file .test_tmp/search_plan_example.json --timeout-seconds 15 --snippet-chars 500 --output-run-dir .test_tmp/page_runs
 ```
+
+The terminal output is a compact filter report. `--output-run-dir` overwrites `accepted_pages.json`, `pending_pages.json`, and `page_collection_report.json` in the given artifact directory. The report includes `collected_at` so the current files still record when they were refreshed.
+
+Clean accepted pages into AI extraction inputs:
+
+```powershell
+.\scripts\uv-local.ps1 run python -m job_radar.cli.clean_pages --pages-file .test_tmp/page_runs/accepted_pages.json --output-file .test_tmp/page_runs/cleaned_pages.json --report-file .test_tmp/page_runs/page_cleaning_report.json --max-text-chars 12000
+```
+
+`cleaned_pages.json` contains `AIPageInput[]` records with `url`, `final_url`, `title`, cleaned `visible_text`, and selected `important_links` such as attachments or apply links. The original accepted page artifact remains available for audit and retries.
 
 ## Run Tests
 
-```bash
-uv run pytest
+```powershell
+.\scripts\uv-local.ps1 run pytest
 ```
 
 ## Demo Data

@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .test_tmp/
+.local_tmp/
 .agents/*
 !.agents/skills/
 !.agents/skills/**

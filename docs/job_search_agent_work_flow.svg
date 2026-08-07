@@ -28,7 +28,7 @@
 <g id="clust6" class="cluster">
 <title>cluster_collect</title>
 <path fill="white" stroke="#90a4ae" stroke-width="1.2" d="M936,-1151.6C936,-1151.6 1521,-1151.6 1521,-1151.6 1527,-1151.6 1533,-1157.6 1533,-1163.6 1533,-1163.6 1533,-1930.6 1533,-1930.6 1533,-1936.6 1527,-1942.6 1521,-1942.6 1521,-1942.6 936,-1942.6 936,-1942.6 930,-1942.6 924,-1936.6 924,-1930.6 924,-1930.6 924,-1163.6 924,-1163.6 924,-1157.6 930,-1151.6 936,-1151.6"/>
-<text text-anchor="middle" x="1228.5" y="-1924.2" font-family="Noto Sans CJK SC" font-size="18.00">4. 搜索、页面读取与 AI 输入准备</text>
+<text text-anchor="middle" x="1228.5" y="-1924.2" font-family="Noto Sans CJK SC" font-size="18.00">4. 搜索、页面读取、清洗与 AI 输入准备</text>
 </g>
 <g id="clust8" class="cluster">
 <title>cluster_extract</title>
@@ -135,7 +135,7 @@
 <title>file_valid&#45;&gt;file_error</title>
 <path fill="none" stroke="#546e7a" stroke-width="1.15" d="M505.25,-3225.07C505.25,-3225.07 505.25,-3163.28 505.25,-3163.28"/>
 <polygon fill="#546e7a" stroke="#546e7a" stroke-width="1.15" points="507.88,-3163.28 505.25,-3155.78 502.63,-3163.28 507.88,-3163.28"/>
-<text text-anchor="middle" x="514" y="-3177.4" font-family="Noto Sans CJK SC" font-size="9.00">否</text>
+<text text-anchor="middle" x="514" y="-3177.4" font-family="Noto Sans CJK SC" font-size="9.00">pending / rejected</text>
 </g>
 <!-- extract_text -->
 <g id="node8" class="node">
@@ -150,7 +150,7 @@
 <title>file_valid&#45;&gt;extract_text</title>
 <path fill="none" stroke="#546e7a" stroke-width="1.15" d="M410.75,-3214.61C410.75,-3214.61 410.75,-3163.22 410.75,-3163.22"/>
 <polygon fill="#546e7a" stroke="#546e7a" stroke-width="1.15" points="413.38,-3163.22 410.75,-3155.72 408.13,-3163.22 413.38,-3163.22"/>
-<text text-anchor="middle" x="407" y="-3177.4" font-family="Noto Sans CJK SC" font-size="9.00">是</text>
+<text text-anchor="middle" x="407" y="-3177.4" font-family="Noto Sans CJK SC" font-size="9.00">accepted</text>
 </g>
 <!-- file_error&#45;&gt;upload -->
 <g id="edge7" class="edge">
@@ -228,7 +228,7 @@
 <title>profile_valid&#45;&gt;repair_profile</title>
 <path fill="none" stroke="#546e7a" stroke-width="1.15" d="M307.25,-2744.93C307.25,-2721.59 307.25,-2645 307.25,-2645 307.25,-2645 313.24,-2645 313.24,-2645"/>
 <polygon fill="#546e7a" stroke="#546e7a" stroke-width="1.15" points="313.24,-2647.63 320.74,-2645 313.24,-2642.38 313.24,-2647.63"/>
-<text text-anchor="middle" x="313" y="-2697.4" font-family="Noto Sans CJK SC" font-size="9.00">否</text>
+<text text-anchor="middle" x="313" y="-2697.4" font-family="Noto Sans CJK SC" font-size="9.00">pending / rejected</text>
 </g>
 <!-- completeness -->
 <g id="node14" class="node">
@@ -245,7 +245,7 @@
 <title>profile_valid&#45;&gt;completeness</title>
 <path fill="none" stroke="#546e7a" stroke-width="1.15" d="M228.75,-2729.12C228.75,-2729.12 228.75,-2683.19 228.75,-2683.19"/>
 <polygon fill="#546e7a" stroke="#546e7a" stroke-width="1.15" points="231.38,-2683.19 228.75,-2675.69 226.13,-2683.19 231.38,-2683.19"/>
-<text text-anchor="middle" x="208" y="-2697.4" font-family="Noto Sans CJK SC" font-size="9.00">是</text>
+<text text-anchor="middle" x="208" y="-2697.4" font-family="Noto Sans CJK SC" font-size="9.00">accepted</text>
 </g>
 <!-- repair_profile&#45;&gt;ai_profile -->
 <g id="edge14" class="edge">
@@ -297,7 +297,7 @@
 <title>is_complete&#45;&gt;ask_user</title>
 <path fill="none" stroke="#546e7a" stroke-width="1.15" d="M305,-2413.38C305,-2413.38 305,-2333.2 305,-2333.2"/>
 <polygon fill="#546e7a" stroke="#546e7a" stroke-width="1.15" points="307.63,-2333.2 305,-2325.7 302.38,-2333.2 307.63,-2333.2"/>
-<text text-anchor="middle" x="317" y="-2384.4" font-family="Noto Sans CJK SC" font-size="9.00">否</text>
+<text text-anchor="middle" x="317" y="-2384.4" font-family="Noto Sans CJK SC" font-size="9.00">pending / rejected</text>
 </g>
 <!-- ai_strategy -->
 <g id="node19" class="node">
@@ -313,7 +313,7 @@
 <title>is_complete&#45;&gt;ai_strategy</title>
 <path fill="none" stroke="#546e7a" stroke-width="1.15" d="M428.5,-2434.02C428.5,-2410.14 428.5,-2301 428.5,-2301 428.5,-2301 718.9,-2301 718.9,-2301"/>
 <polygon fill="#546e7a" stroke="#546e7a" stroke-width="1.15" points="718.9,-2303.63 726.4,-2301 718.9,-2298.38 718.9,-2303.63"/>
-<text text-anchor="middle" x="572" y="-2384.4" font-family="Noto Sans CJK SC" font-size="9.00">是</text>
+<text text-anchor="middle" x="572" y="-2384.4" font-family="Noto Sans CJK SC" font-size="9.00">accepted</text>
 </g>
 <!-- merge_profile -->
 <g id="node18" class="node">
@@ -433,7 +433,7 @@
 <title>collect_page</title>
 <path fill="#e8f5e9" stroke="#2e7d32" stroke-width="2" d="M1198,-1718.6C1198,-1718.6 956,-1718.6 956,-1718.6 950,-1718.6 944,-1712.6 944,-1706.6 944,-1706.6 944,-1692.6 944,-1692.6 944,-1686.6 950,-1680.6 956,-1680.6 956,-1680.6 1198,-1680.6 1198,-1680.6 1204,-1680.6 1210,-1686.6 1210,-1692.6 1210,-1692.6 1210,-1706.6 1210,-1706.6 1210,-1712.6 1204,-1718.6 1198,-1718.6"/>
 <text text-anchor="start" x="1018.5" y="-1702.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;</text>
-<text text-anchor="start" x="1032.5" y="-1702.8" font-family="Noto Sans CJK SC" font-weight="bold" font-size="11.00">Tool：读取岗位详情</text>
+<text text-anchor="start" x="1032.5" y="-1702.8" font-family="Noto Sans CJK SC" font-weight="bold" font-size="11.00">Tool：读取页面</text>
 <text text-anchor="start" x="956" y="-1691.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;HttpPageTool collect_page → PageContent &#160;&#160;&#160;</text>
 </g>
 <!-- candidate_sources&#45;&gt;collect_page -->
@@ -448,7 +448,7 @@
 <path fill="#f5f5f5" stroke="#616161" stroke-width="1.25" d="M1420.5,-1632.6C1420.5,-1632.6 1125.5,-1632.6 1125.5,-1632.6 1119.5,-1632.6 1113.5,-1626.6 1113.5,-1620.6 1113.5,-1620.6 1113.5,-1606.6 1113.5,-1606.6 1113.5,-1600.6 1119.5,-1594.6 1125.5,-1594.6 1125.5,-1594.6 1420.5,-1594.6 1420.5,-1594.6 1426.5,-1594.6 1432.5,-1600.6 1432.5,-1606.6 1432.5,-1606.6 1432.5,-1620.6 1432.5,-1620.6 1432.5,-1626.6 1426.5,-1632.6 1420.5,-1632.6"/>
 <text text-anchor="start" x="1231" y="-1616.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;</text>
 <text text-anchor="start" x="1245" y="-1616.8" font-family="Noto Sans CJK SC" font-weight="bold" font-size="11.00">PageContent</text>
-<text text-anchor="start" x="1125.5" y="-1605.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;url / final_url / status / title / visible_text / links / error &#160;&#160;&#160;</text>
+<text text-anchor="start" x="1125.5" y="-1605.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;url / final_url / status / title / text / html / links / error &#160;&#160;&#160;</text>
 </g>
 <!-- collect_page&#45;&gt;page_content -->
 <g id="edge29" class="edge">
@@ -476,10 +476,10 @@
 <title>page_filter</title>
 <path fill="#e3f2fd" stroke="#1565c0" stroke-width="2" d="M1412,-1555.6C1412,-1555.6 1134,-1555.6 1134,-1555.6 1128,-1555.6 1122,-1549.6 1122,-1543.6 1122,-1543.6 1122,-1507.6 1122,-1507.6 1122,-1501.6 1128,-1495.6 1134,-1495.6 1134,-1495.6 1412,-1495.6 1412,-1495.6 1418,-1495.6 1424,-1501.6 1424,-1507.6 1424,-1507.6 1424,-1543.6 1424,-1543.6 1424,-1549.6 1418,-1555.6 1412,-1555.6"/>
 <text text-anchor="start" x="1192" y="-1539.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;</text>
-<text text-anchor="start" x="1206" y="-1539.8" font-family="Noto Sans CJK SC" font-weight="bold" font-size="11.00">程序：硬失败粗筛 PageFilter</text>
-<text text-anchor="start" x="1134" y="-1528.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;只过滤抓取失败、HTTP 错误、error redirect、404、</text>
-<text text-anchor="start" x="1181.5" y="-1517.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;岗位下线、招聘结束、明显登录墙</text>
-<text text-anchor="start" x="1142" y="-1506.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;不判断是否完整 JD；短页面 / 列表页继续交给 AI &#160;&#160;&#160;</text>
+<text text-anchor="start" x="1206" y="-1539.8" font-family="Noto Sans CJK SC" font-weight="bold" font-size="11.00">程序：页面分流 PageFilter</text>
+<text text-anchor="start" x="1134" y="-1528.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;accepted：页面可用，进入正文清洗</text>
+<text text-anchor="start" x="1181.5" y="-1517.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;pending：需重试 / JS 渲染 / 二次处理</text>
+<text text-anchor="start" x="1142" y="-1506.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;rejected：无效页面，记录并跳过 &#160;&#160;&#160;</text>
 </g>
 <!-- page_content&#45;&gt;page_filter -->
 <g id="edge30" class="edge">
@@ -491,7 +491,7 @@
 <g id="node30" class="node">
 <title>page_pass</title>
 <path fill="#e3f2fd" stroke="#1565c0" stroke-width="1.25" d="M1261.34,-1453.76C1261.34,-1453.76 1169.66,-1431.44 1169.66,-1431.44 1163.83,-1430.02 1163.83,-1427.18 1169.66,-1425.76 1169.66,-1425.76 1261.34,-1403.44 1261.34,-1403.44 1267.17,-1402.02 1278.83,-1402.02 1284.66,-1403.44 1284.66,-1403.44 1376.34,-1425.76 1376.34,-1425.76 1382.17,-1427.18 1382.17,-1430.02 1376.34,-1431.44 1376.34,-1431.44 1284.66,-1453.76 1284.66,-1453.76 1278.83,-1455.18 1267.17,-1455.18 1261.34,-1453.76"/>
-<text text-anchor="middle" x="1273" y="-1425.8" font-family="Noto Sans CJK SC" font-size="11.00">通过硬失败过滤？</text>
+<text text-anchor="middle" x="1273" y="-1425.8" font-family="Noto Sans CJK SC" font-size="11.00">页面分流结果</text>
 </g>
 <!-- page_filter&#45;&gt;page_pass -->
 <g id="edge31" class="edge">
@@ -504,44 +504,39 @@
 <title>rejected_page</title>
 <path fill="#ffebee" stroke="#c62828" stroke-width="1.25" d="M1494.5,-1352.6C1494.5,-1352.6 1325.5,-1352.6 1325.5,-1352.6 1319.5,-1352.6 1313.5,-1346.6 1313.5,-1340.6 1313.5,-1340.6 1313.5,-1326.6 1313.5,-1326.6 1313.5,-1320.6 1319.5,-1314.6 1325.5,-1314.6 1325.5,-1314.6 1494.5,-1314.6 1494.5,-1314.6 1500.5,-1314.6 1506.5,-1320.6 1506.5,-1326.6 1506.5,-1326.6 1506.5,-1340.6 1506.5,-1340.6 1506.5,-1346.6 1500.5,-1352.6 1494.5,-1352.6"/>
 <text text-anchor="start" x="1357.5" y="-1336.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;</text>
-<text text-anchor="start" x="1371.5" y="-1336.8" font-family="Noto Sans CJK SC" font-weight="bold" font-size="11.00">程序：记录并跳过</text>
-<text text-anchor="start" x="1325.5" y="-1325.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;failure_reason + source trace &#160;&#160;&#160;</text>
+<text text-anchor="start" x="1371.5" y="-1336.8" font-family="Noto Sans CJK SC" font-weight="bold" font-size="11.00">pending / rejected</text>
+<text text-anchor="start" x="1325.5" y="-1325.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;记录问题；必要时进入二次处理 &#160;&#160;&#160;</text>
 </g>
 <!-- page_pass&#45;&gt;rejected_page -->
 <g id="edge33" class="edge">
 <title>page_pass&#45;&gt;rejected_page</title>
 <path fill="none" stroke="#546e7a" stroke-width="1.15" d="M1350.75,-1419.49C1350.75,-1419.49 1350.75,-1360.13 1350.75,-1360.13"/>
 <polygon fill="#546e7a" stroke="#546e7a" stroke-width="1.15" points="1353.38,-1360.13 1350.75,-1352.63 1348.13,-1360.13 1353.38,-1360.13"/>
-<text text-anchor="middle" x="1357" y="-1374.4" font-family="Noto Sans CJK SC" font-size="9.00">否</text>
+<text text-anchor="middle" x="1357" y="-1374.4" font-family="Noto Sans CJK SC" font-size="9.00">pending / rejected</text>
 </g>
 <!-- trim_input -->
 <g id="node32" class="node">
 <title>trim_input</title>
 <path fill="#e3f2fd" stroke="#1565c0" stroke-width="2" d="M1274,-1352.6C1274,-1352.6 1000,-1352.6 1000,-1352.6 994,-1352.6 988,-1346.6 988,-1340.6 988,-1340.6 988,-1326.6 988,-1326.6 988,-1320.6 994,-1314.6 1000,-1314.6 1000,-1314.6 1274,-1314.6 1274,-1314.6 1280,-1314.6 1286,-1320.6 1286,-1326.6 1286,-1326.6 1286,-1340.6 1286,-1340.6 1286,-1346.6 1280,-1352.6 1274,-1352.6"/>
 <text text-anchor="start" x="1068" y="-1336.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;</text>
-<text text-anchor="start" x="1082" y="-1336.8" font-family="Noto Sans CJK SC" font-weight="bold" font-size="11.00">程序：裁剪 AIPageInput</text>
-<text text-anchor="start" x="1000" y="-1325.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;只保留 AI 抽取需要的页面事实，减少 token 与偏见 &#160;&#160;&#160;</text>
+<text text-anchor="start" x="1082" y="-1336.8" font-family="Noto Sans CJK SC" font-weight="bold" font-size="11.00">程序：页面正文抽取与清洗</text>
+<text text-anchor="start" x="1000" y="-1325.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;提取有效正文、去除页面噪声、控制输入长度 &#160;&#160;&#160;</text>
 </g>
 <!-- page_pass&#45;&gt;trim_input -->
 <g id="edge34" class="edge">
 <title>page_pass&#45;&gt;trim_input</title>
 <path fill="none" stroke="#546e7a" stroke-width="1.15" d="M1222,-1412.91C1222,-1412.91 1222,-1360.42 1222,-1360.42"/>
 <polygon fill="#546e7a" stroke="#546e7a" stroke-width="1.15" points="1224.63,-1360.42 1222,-1352.92 1219.38,-1360.42 1224.63,-1360.42"/>
-<text text-anchor="middle" x="1200" y="-1374.4" font-family="Noto Sans CJK SC" font-size="9.00">是</text>
+<text text-anchor="middle" x="1200" y="-1374.4" font-family="Noto Sans CJK SC" font-size="9.00">accepted</text>
 </g>
 <!-- ai_page_input -->
 <g id="node33" class="node">
 <title>ai_page_input</title>
 <path fill="#f5f5f5" stroke="#616161" stroke-width="1.25" d="M1312.5,-1275.6C1312.5,-1275.6 961.5,-1275.6 961.5,-1275.6 955.5,-1275.6 949.5,-1269.6 949.5,-1263.6 949.5,-1263.6 949.5,-1183.6 949.5,-1183.6 949.5,-1177.6 955.5,-1171.6 961.5,-1171.6 961.5,-1171.6 1312.5,-1171.6 1312.5,-1171.6 1318.5,-1171.6 1324.5,-1177.6 1324.5,-1183.6 1324.5,-1183.6 1324.5,-1263.6 1324.5,-1263.6 1324.5,-1269.6 1318.5,-1275.6 1312.5,-1275.6"/>
-<text text-anchor="start" x="961.5" y="-1259.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;</text>
-<text text-anchor="start" x="975.5" y="-1259.8" font-family="Noto Sans CJK SC" font-weight="bold" font-size="11.00">AIPageInput</text>
-<text text-anchor="start" x="961.5" y="-1248.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;{</text>
-<text text-anchor="start" x="961.5" y="-1237.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;  &quot;url&quot;: &quot;...&quot;,</text>
-<text text-anchor="start" x="961.5" y="-1226.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;  &quot;final_url&quot;: &quot;...&quot;,</text>
-<text text-anchor="start" x="961.5" y="-1215.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;  &quot;title&quot;: &quot;...&quot;,</text>
-<text text-anchor="start" x="961.5" y="-1204.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;  &quot;visible_text&quot;: &quot;...&quot;</text>
-<text text-anchor="start" x="961.5" y="-1193.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;}</text>
-<text text-anchor="start" x="961.5" y="-1182.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;不传 relevance_score / reason / company_type / is_official / links &#160;&#160;&#160;</text>
+<text text-anchor="start" x="1048" y="-1248.8" font-family="Noto Sans CJK SC" font-weight="bold" font-size="11.00">AIPageInput</text>
+<text text-anchor="start" x="1000" y="-1226.8" font-family="Noto Sans CJK SC" font-size="11.00">url / final_url / title</text>
+<text text-anchor="start" x="1000" y="-1204.8" font-family="Noto Sans CJK SC" font-size="11.00">cleaned visible_text / important_links</text>
+<text text-anchor="start" x="1000" y="-1182.8" font-family="Noto Sans CJK SC" font-size="11.00">仅保留岗位抽取所需的清洗后页面信息</text>
 </g>
 <!-- trim_input&#45;&gt;ai_page_input -->
 <g id="edge35" class="edge">
@@ -585,7 +580,7 @@
 <text text-anchor="start" x="1002" y="-905.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;</text>
 <text text-anchor="start" x="1016" y="-905.8" font-family="Noto Sans CJK SC" font-weight="bold" font-size="11.00">程序：Validation / Normalization / Deduplication</text>
 <text text-anchor="start" x="948.5" y="-894.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;Pydantic 校验、字段标准化、日期与地点统一、URL 去重、重复岗位合并</text>
-<text text-anchor="start" x="1026.5" y="-883.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;AI 负责抽结构；Python 负责校验和清洗 &#160;&#160;&#160;</text>
+<text text-anchor="start" x="1026.5" y="-883.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;AI 负责语义抽取；Python 负责校验、清洗、规范化与去重 &#160;&#160;&#160;</text>
 </g>
 <!-- raw_jobs&#45;&gt;validate_jobs -->
 <g id="edge38" class="edge">
@@ -641,7 +636,7 @@
 <path fill="#e3f2fd" stroke="#1565c0" stroke-width="1.25" d="M1787.5,-307.6C1787.5,-307.6 1396.5,-307.6 1396.5,-307.6 1390.5,-307.6 1384.5,-301.6 1384.5,-295.6 1384.5,-295.6 1384.5,-281.6 1384.5,-281.6 1384.5,-275.6 1390.5,-269.6 1396.5,-269.6 1396.5,-269.6 1787.5,-269.6 1787.5,-269.6 1793.5,-269.6 1799.5,-275.6 1799.5,-281.6 1799.5,-281.6 1799.5,-295.6 1799.5,-295.6 1799.5,-301.6 1793.5,-307.6 1787.5,-307.6"/>
 <text text-anchor="start" x="1551" y="-291.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;</text>
 <text text-anchor="start" x="1565" y="-291.8" font-family="Noto Sans CJK SC" font-weight="bold" font-size="11.00">程序：持久化</text>
-<text text-anchor="start" x="1396.5" y="-280.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;保存画像、SearchPlan、CandidateSource、PageFilter 日志、岗位与版本 &#160;&#160;&#160;</text>
+<text text-anchor="start" x="1396.5" y="-280.8" font-family="Noto Sans CJK SC" font-size="11.00"> &#160;&#160;&#160;&#160;&#160;保存画像、SearchPlan、页面处理结果、岗位与版本 &#160;&#160;&#160;</text>
 </g>
 <!-- valid_jobs&#45;&gt;save -->
 <g id="edge48" class="edge">
@@ -714,7 +709,7 @@
 <title>continue_decision&#45;&gt;apply_adjustment</title>
 <path fill="none" stroke="#7b1fa2" stroke-width="1.15" stroke-dasharray="5,2" d="M1175,-392.28C1175,-392.28 1175,-315.41 1175,-315.41"/>
 <polygon fill="#7b1fa2" stroke="#7b1fa2" stroke-width="1.15" points="1177.63,-315.41 1175,-307.91 1172.38,-315.41 1177.63,-315.41"/>
-<text text-anchor="middle" x="1180" y="-366.4" font-family="Noto Sans CJK SC" font-size="9.00">是</text>
+<text text-anchor="middle" x="1180" y="-366.4" font-family="Noto Sans CJK SC" font-size="9.00">accepted</text>
 </g>
 <!-- continue_decision&#45;&gt;save -->
 <g id="edge50" class="edge">

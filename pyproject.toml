@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2.7.0",
     "pyyaml>=6.0.0",
     "streamlit>=1.36.0",
+    "trafilatura>=2.2.0",
 ]
 
 [dependency-groups]
@@ -20,3 +21,5 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = ["--basetemp=.local_tmp/pytest"]
+cache_dir = ".local_tmp/pytest-cache"
