@@ -6,11 +6,13 @@ from pydantic import TypeAdapter, ValidationError
 from job_radar.agent.orchestrator import JobDiscoveryAgent
 from job_radar.cli.clean_pages import main as clean_pages_cli_main
 from job_radar.cli.collect_pages import main as collect_pages_cli_main
+from job_radar.cli.extract_jobs import main as extract_jobs_cli_main
 from job_radar.cli.search_strategy import main as search_strategy_cli_main
 from job_radar.cli.web_search import main as web_search_cli_main
 from job_radar.ai.providers.codex_cli import CodexCliDebugInfo, CodexCliProvider
 from job_radar.ai.providers.mock import MockAIProvider
-from job_radar.ai.structured_output import validate_model
+from job_radar.ai.providers.ollama import OllamaProvider
+from job_radar.ai.structured_output import StructuredOutputError, parse_json_output, validate_model
 from job_radar.ai.tasks.job_extraction import (
     AIJobExtractionClient,
     AIPageInput,
@@ -237,6 +239,61 @@ def test_codex_provider_uses_utf8_for_prompt(monkeypatch) -> None:
     assert captured["input"] == "\ufeff生成搜索策略"
     assert captured["encoding"] == "utf-8"
     assert captured["errors"] == "replace"
+
+
+def test_ollama_provider_parses_message_content_json(monkeypatch) -> None:
+    captured = {}
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b'{"message":{"content":"[{\\"company_name\\":\\"Example\\"}]"}}'
+
+    def fake_urlopen(request, timeout=180):
+        captured["url"] = request.full_url
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("job_radar.ai.providers.ollama.urlopen", fake_urlopen)
+
+    data = OllamaProvider(model="qwen3.5:cloud").generate_json("extract", timeout_seconds=12)
+
+    assert data == [{"company_name": "Example"}]
+    assert captured["url"] == "http://localhost:11434/api/chat"
+    assert captured["body"]["model"] == "qwen3.5:cloud"
+    assert captured["body"]["format"] == "json"
+    assert captured["body"]["stream"] is False
+    assert captured["body"]["think"] is False
+    assert captured["timeout"] == 12
+
+    OllamaProvider(model="gpt-oss:20b-cloud").generate_json("extract")
+
+    assert captured["body"]["think"] == "low"
+
+
+def test_parse_json_output_repairs_only_trailing_container_closures() -> None:
+    dell_output = (
+        '{"page_id":"page-1","page_context":{},"jobs":['
+        '{"title":"Data analyst","requirements":"Excel"}}'
+    )
+
+    parsed = parse_json_output(dell_output)
+
+    assert parsed["jobs"][0]["title"] == "Data analyst"
+
+    with pytest.raises(StructuredOutputError):
+        parse_json_output('{"jobs":[{"title": invalid}]}')
+
+    with pytest.raises(StructuredOutputError):
+        parse_json_output('{"jobs":[{"title":"unterminated}]}')
 
 
 def test_codex_web_search_tool_validates_candidate_sources() -> None:
@@ -784,7 +841,7 @@ def test_manual_source_tool_pipeline_with_local_html(temp_db_path) -> None:
     assert [event.tool_name for event in agent_result.tool_events] == ["web_search", "collect_page"]
 
 
-def test_build_ai_page_input_drops_search_metadata() -> None:
+def test_build_ai_page_input_preserves_provenance_but_drops_search_scoring() -> None:
     page = PageContent(
         url="https://careers.example/job/123",
         source_name="Example Careers",
@@ -810,6 +867,10 @@ def test_build_ai_page_input_drops_search_metadata() -> None:
     assert payload == {
         "url": "https://careers.example/job/123",
         "final_url": "https://careers.example/job/123",
+        "source_name": "Example Careers",
+        "source_company_name": "Example",
+        "company_type": "Technology",
+        "is_official": True,
         "title": "Data Analyst Graduate",
         "visible_text": "line one\nline two",
         "important_links": [
@@ -843,8 +904,35 @@ def test_extract_important_links_keeps_attachments_and_apply_links() -> None:
 
     links = extract_important_links(page)
 
-    assert [link.kind for link in links] == ["attachment", "apply"]
-    assert links[0].url.endswith(".pdf")
+    assert [link.kind for link in links] == ["apply", "attachment"]
+    assert links[1].url.endswith(".pdf")
+
+
+def test_extract_important_links_uses_visible_apply_url_and_rejects_misleading_path() -> None:
+    page = PageContent(
+        url="https://www.boc.cn/recruitment",
+        source_name="Bank of China",
+        title="Spring recruitment",
+        text=(
+            "春季招聘网站为：\n"
+            "https://campus.chinahr.com/pages/boc-2026-Spring\n"
+            "请在线报名。"
+        ),
+        metadata={
+            "links": [
+                {
+                    "href": "https://university.example/applyguide/index.html",
+                    "text": "活动预告",
+                }
+            ]
+        },
+    )
+
+    links = extract_important_links(page)
+
+    assert [(link.kind, link.url) for link in links] == [
+        ("apply", "https://campus.chinahr.com/pages/boc-2026-Spring")
+    ]
 
 
 def test_important_link_rejects_unknown_kind() -> None:
@@ -921,6 +1009,9 @@ def test_clean_pages_cli_writes_ai_page_inputs(capsys, tmp_path) -> None:
                     ),
                     "metadata": {
                         "final_url": "https://careers.example/job/123",
+                        "company_name": "Example",
+                        "company_type": "Technology",
+                        "is_official": True,
                         "relevance_score": 95,
                         "links": [
                             {"href": "https://careers.example/job-description.pdf", "text": "PDF"},
@@ -957,6 +1048,10 @@ def test_clean_pages_cli_writes_ai_page_inputs(capsys, tmp_path) -> None:
     assert exit_code == 0
     assert len(cleaned_inputs) == 1
     assert cleaned_inputs[0].url == "https://careers.example/job/123"
+    assert cleaned_inputs[0].source_name == "Example Careers"
+    assert cleaned_inputs[0].source_company_name == "Example"
+    assert cleaned_inputs[0].company_type == "Technology"
+    assert cleaned_inputs[0].is_official is True
     assert "Analyze metrics" in cleaned_inputs[0].visible_text
     assert cleaned_inputs[0].important_links[0].kind == "attachment"
     assert "首页" not in cleaned_inputs[0].visible_text
@@ -983,19 +1078,40 @@ def test_ai_job_extraction_client_prompts_with_minimal_page_input() -> None:
         },
     )
     provider = MockAIProvider(
-        [
-            {
+        {
+            "page_id": "page-1",
+            "page_context": {
                 "company_name": "Example",
-                "title": "Data Analyst Graduate",
-                "source_url": "https://careers.example/job/123",
-                "source_name": "Example Careers",
-            }
-        ]
+                "recruitment_type": "Graduate Program",
+                "graduation_years": [2026],
+                "source_url": "https://hallucinated.example/job",
+                "apply_url": "https://hallucinated.example/file.pdf",
+                "is_official": False,
+            },
+            "jobs": [
+                {
+                    "title": "Data Analyst Graduate",
+                    "location": "Sydney",
+                },
+                {
+                    "title": "Software Engineer Graduate",
+                    "location": "Melbourne",
+                }
+            ],
+        }
     )
 
     records = AIJobExtractionClient(provider, max_text_chars=200).extract_jobs_from_page(page)
 
     assert records[0].title == "Data Analyst Graduate"
+    assert records[1].title == "Software Engineer Graduate"
+    assert all(record.company_name == "Example" for record in records)
+    assert all(record.company_type == "Technology" for record in records)
+    assert all(record.source_url == "https://careers.example/job/123" for record in records)
+    assert all(record.source_name == "Example Careers" for record in records)
+    assert all(record.is_official is True for record in records)
+    assert all(record.apply_url is None for record in records)
+    assert all(record.graduation_years == ["2026"] for record in records)
     assert provider.prompts
     prompt = provider.prompts[0]
     input_payload = prompt.rsplit("Input:\n", maxsplit=1)[1]
@@ -1004,6 +1120,179 @@ def test_ai_job_extraction_client_prompts_with_minimal_page_input() -> None:
     assert "Search result explanation" not in input_payload
     assert '"company_type": "Technology"' not in input_payload
     assert '"is_official": true' not in input_payload
+    assert "https://careers.example/job/123" not in input_payload
+    assert "important_links" not in input_payload
+    assert "Return every explicitly named position" in prompt
+
+
+def test_ai_job_extraction_schema_accepts_empty_jobs_for_later_program_validation() -> None:
+    provider = MockAIProvider(
+        {
+            "page_id": "page-1",
+            "page_context": {"company_name": "Example"},
+            "jobs": [],
+        }
+    )
+    page_input = AIPageInput(
+        url="https://careers.example/jobs",
+        title="Example careers",
+        visible_text="No named positions were extracted.",
+    )
+
+    records = AIJobExtractionClient(provider).extract_jobs_from_input(page_input)
+
+    assert records == []
+
+
+def test_extract_jobs_cli_prepares_cleaned_pages_with_ollama_provider(capsys, monkeypatch, tmp_path) -> None:
+    cleaned_pages_path = tmp_path / "cleaned_pages.json"
+    run_dir = tmp_path / "job_runs"
+    cleaned_pages_path.write_text(
+        json.dumps(
+            [
+                {
+                    "url": "https://careers.example/job/1",
+                    "final_url": "https://careers.example/job/1",
+                    "source_name": "Example Careers",
+                    "source_company_name": "Example Source Hint",
+                    "company_type": "Technology",
+                    "is_official": True,
+                    "title": "Data Analyst Graduate",
+                    "visible_text": "Data Analyst Graduate. Location Sydney. Requirements Python SQL.",
+                    "important_links": [
+                        {
+                            "url": "https://careers.example/apply/1",
+                            "text": "Apply",
+                            "kind": "apply",
+                            "reason": "apply_signal",
+                        }
+                    ],
+                },
+                {
+                    "url": "https://careers.example/job/2",
+                    "final_url": "https://careers.example/job/2",
+                    "source_name": "Example Careers",
+                    "title": "Data Analyst Graduate duplicate",
+                    "visible_text": "Duplicate Data Analyst Graduate. Location Sydney.",
+                    "important_links": [],
+                },
+                {
+                    "url": "https://careers.example/job/3",
+                    "final_url": "https://careers.example/job/3",
+                    "source_name": "Example Careers",
+                    "title": "Invalid missing title",
+                    "visible_text": "Company Example. Location Sydney.",
+                    "important_links": [],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeOllamaProvider:
+        calls = 0
+        prompts = []
+
+        def __init__(self, model="qwen3.5:cloud", base_url="http://localhost:11434"):
+            self.model = model
+            self.base_url = base_url
+
+        def is_available(self):
+            return True
+
+        def generate_json(self, prompt, timeout_seconds=180):
+            type(self).calls += 1
+            type(self).prompts.append(prompt)
+            if type(self).calls == 1:
+                return [
+                    {
+                        "page_id": f"page-{index}",
+                        "page_context": {"company_name": "Example"},
+                        "jobs": [],
+                    }
+                    for index in range(1, 4)
+                ]
+            return [
+                {
+                    "page_id": "page-1",
+                    "page_context": {
+                        "company_name": "Example",
+                    },
+                    "jobs": [
+                        {
+                            "title": "Data Analyst Graduate",
+                            "location": "Sydney",
+                            "description": "Analyze metrics.",
+                            "requirements": "Python SQL.",
+                        }
+                    ],
+                },
+                {
+                    "page_id": "page-2",
+                    "page_context": {
+                        "company_name": "Example",
+                    },
+                    "jobs": [
+                        {
+                            "title": "Data Analyst Graduate",
+                            "location": "Sydney",
+                            "description": "Analyze metrics.",
+                            "requirements": "Python SQL.",
+                        }
+                    ],
+                },
+                {
+                    "page_id": "page-3",
+                    "page_context": {
+                        "company_name": "Example",
+                    },
+                    "jobs": [{"location": "Sydney"}],
+                },
+            ]
+
+    monkeypatch.setattr("job_radar.cli.extract_jobs.OllamaProvider", FakeOllamaProvider)
+
+    exit_code = extract_jobs_cli_main(
+        [
+            "--cleaned-pages-file",
+            str(cleaned_pages_path),
+            "--output-run-dir",
+            str(run_dir),
+            "--max-pages",
+            "3",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    prepared_jobs = json.loads((run_dir / "prepared_jobs.json").read_text(encoding="utf-8"))
+    report = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert sorted(path.name for path in run_dir.iterdir()) == ["prepared_jobs.json"]
+    assert len(prepared_jobs) == 1
+    assert prepared_jobs[0]["normalized_title"] == "data analyst graduate"
+    assert prepared_jobs[0]["source_url"] == "https://careers.example/job/1"
+    assert prepared_jobs[0]["source_name"] == "Example Careers"
+    assert prepared_jobs[0]["company_type"] == "Technology"
+    assert prepared_jobs[0]["is_official"] is True
+    assert prepared_jobs[0]["apply_url"] == "https://careers.example/apply/1"
+    assert len(report["duplicate_jobs"]) == 1
+    assert len(report["errors"]) == 1
+    assert "title" in report["errors"][0]["reason"]
+    assert report["prepared_count"] == 1
+    assert report["duplicate_count"] == 1
+    assert report["provider"] == "ollama"
+    assert report["retry_count"] == 1
+    assert report["timing"]["extraction_seconds"] >= 0
+    assert report["timing"]["preparation_seconds"] >= 0
+    assert report["timing"]["total_seconds"] >= report["timing"]["extraction_seconds"]
+    assert "Loaded 3 cleaned page(s). Provider: ollama." in captured.err
+    assert "[1-3/3] extracting" in captured.err
+    assert "[1-3/3] retrying" in captured.err
+    assert "Program reliability validation" in captured.err
+    assert "3 record(s) in " in captured.err
+    assert FakeOllamaProvider.calls == 2
+    assert "public job posting data" in FakeOllamaProvider.prompts[1]
 
 
 def test_llm_job_extractor_uses_llm_client_interface(temp_db_path) -> None:

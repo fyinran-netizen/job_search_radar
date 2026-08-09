@@ -1,5 +1,7 @@
 from job_radar.config import load_matching_rules, load_profile
+from job_radar.models.job import RawJobRecord
 from job_radar.pipeline.deduplication import deduplicate_records
+from job_radar.pipeline.job_preparation import prepare_records_for_analysis
 from job_radar.pipeline.matching import match_records
 from job_radar.pipeline.normalization import normalize_records
 from job_radar.pipeline.runner import PipelineRunner
@@ -25,6 +27,60 @@ def test_validation_rejects_invalid_job() -> None:
     assert "title" in result.errors[0].reason
 
 
+def test_validation_and_normalization_preserve_missing_location() -> None:
+    record = RawJobRecord(
+        company_name="Example",
+        title="Graduate Analyst",
+        location=None,
+        source_name="Example Careers",
+        source_url="https://careers.example/jobs/1",
+    )
+
+    validation = validate_records([record])
+    normalized = normalize_records(validation.valid_records)
+
+    assert validation.errors == []
+    assert normalized[0].location is None
+    assert normalized[0].normalized_location == ""
+    assert normalized[0].deduplication_key == "example|graduate analyst|"
+
+
+def test_validation_rejects_invalid_source_url_and_dates() -> None:
+    record = RawJobRecord(
+        company_name="Example",
+        title="Graduate Analyst",
+        source_name="Example Careers",
+        source_url="not-a-url",
+        published_at="01/08/2026",
+    )
+
+    result = validate_records([record])
+
+    assert len(result.errors) == 1
+    assert "source_url must be a supported absolute URL" in result.errors[0].reason
+    assert "published_at must be an ISO 8601 date" in result.errors[0].reason
+
+
+def test_normalization_canonicalizes_semantic_fields() -> None:
+    record = RawJobRecord(
+        company_name=" Example  Bank ",
+        title="Graduate  Analyst",
+        location="上海； 北京 / 深圳",
+        description="Analyse\n  business data",
+        requirements="Python\nSQL",
+        graduation_years=["2027届", "2026", "2027"],
+        source_name="Example Careers",
+        source_url="https://careers.example/jobs/1",
+    )
+
+    normalized = normalize_records([record])[0]
+
+    assert normalized.location == "上海, 北京, 深圳"
+    assert normalized.description == "Analyse business data"
+    assert normalized.requirements == "Python SQL"
+    assert normalized.graduation_years == ["2026", "2027"]
+
+
 def test_deduplication_removes_obvious_duplicate() -> None:
     records = DemoCsvTool(DEMO_JOBS_PATH).collect()
     valid = validate_records(records).valid_records
@@ -33,6 +89,47 @@ def test_deduplication_removes_obvious_duplicate() -> None:
 
     assert len(result.unique_records) == 4
     assert len(result.duplicate_records) == 1
+
+
+def test_deduplication_keeps_richer_official_record() -> None:
+    base = {
+        "company_name": "Example Bank",
+        "title": "Data Analyst",
+        "location": "Shanghai",
+        "source_name": "Example Careers",
+    }
+    third_party = RawJobRecord(
+        **base,
+        source_url="https://jobs.example/1",
+        description="Summary",
+    )
+    official = RawJobRecord(
+        **base,
+        source_url="https://careers.example/1",
+        description="Detailed description",
+        requirements="Python and SQL",
+        is_official=True,
+    )
+
+    result = deduplicate_records(normalize_records([third_party, official]))
+
+    assert [record.source_url for record in result.unique_records] == ["https://careers.example/1"]
+    assert [record.source_url for record in result.duplicate_records] == ["https://jobs.example/1"]
+
+
+def test_prepare_records_for_analysis_stops_before_matching() -> None:
+    records = DemoCsvTool(DEMO_JOBS_PATH).collect()
+
+    result = prepare_records_for_analysis(records)
+
+    assert result.raw_count == 6
+    assert result.valid_count == 5
+    assert result.invalid_count == 1
+    assert result.duplicate_count == 1
+    assert len(result.prepared_records) == 4
+    assert result.prepared_records[0].deduplication_key
+    assert result.prepared_records[0].match_score == 0
+    assert result.errors
 
 
 def test_matcher_outputs_score_and_reasons() -> None:

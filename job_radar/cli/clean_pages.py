@@ -48,6 +48,10 @@ def main(argv: list[str] | None = None) -> int:
             AIPageInput(
                 url=page.url,
                 final_url=final_url if isinstance(final_url, str) else None,
+                source_name=page.source_name,
+                source_company_name=_metadata_string(page, "company_name"),
+                company_type=_metadata_string(page, "company_type"),
+                is_official=bool(page.metadata.get("is_official", False)),
                 title=page.title,
                 visible_text=cleaned.text,
                 important_links=important_links,
@@ -93,6 +97,11 @@ def main(argv: list[str] | None = None) -> int:
 def _load_pages(path: str) -> list[PageContent]:
     with open(path, encoding="utf-8-sig") as file:
         return TypeAdapter(list[PageContent]).validate_python(json.load(file))
+
+
+def _metadata_string(page: PageContent, key: str) -> str | None:
+    value = page.metadata.get(key)
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _write_json(path: str, payload: object) -> None:

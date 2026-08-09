@@ -1,6 +1,8 @@
 """Validation for raw job records."""
 
 from dataclasses import dataclass, field
+from datetime import date
+from urllib.parse import urlparse
 
 from job_radar.models.job import RawJobRecord
 
@@ -24,7 +26,27 @@ class ValidationResult:
     errors: list[ValidationErrorItem] = field(default_factory=list)
 
 
-REQUIRED_FIELDS = ["company_name", "title", "location", "source_name"]
+REQUIRED_FIELDS = ["company_name", "title", "source_name"]
+
+
+ALLOWED_URL_SCHEMES = {"http", "https", "file", "mock"}
+
+
+def _is_safe_absolute_url(value: str) -> bool:
+    parsed = urlparse(value)
+    if parsed.scheme not in ALLOWED_URL_SCHEMES:
+        return False
+    if parsed.scheme == "file":
+        return bool(parsed.path)
+    return bool(parsed.netloc)
+
+
+def _is_iso_date(value: str) -> bool:
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
 
 
 def validate_records(records: list[RawJobRecord]) -> ValidationResult:
@@ -37,13 +59,32 @@ def validate_records(records: list[RawJobRecord]) -> ValidationResult:
             for field_name in REQUIRED_FIELDS
             if not getattr(record, field_name) or not str(getattr(record, field_name)).strip()
         ]
-        if not record.apply_url and not record.source_url:
-            missing.append("apply_url_or_source_url")
-        if missing:
+        if not record.source_url:
+            missing.append("source_url")
+
+        invalid: list[str] = []
+        for field_name in ("source_url", "apply_url"):
+            value = getattr(record, field_name)
+            if value and not _is_safe_absolute_url(value):
+                invalid.append(f"{field_name} must be a supported absolute URL")
+        for field_name in ("published_at", "deadline"):
+            value = getattr(record, field_name)
+            if value and not _is_iso_date(value):
+                invalid.append(f"{field_name} must be an ISO 8601 date")
+        if record.published_at and record.deadline:
+            if _is_iso_date(record.published_at) and _is_iso_date(record.deadline):
+                if date.fromisoformat(record.deadline) < date.fromisoformat(record.published_at):
+                    invalid.append("deadline must not be earlier than published_at")
+
+        if missing or invalid:
+            reasons: list[str] = []
+            if missing:
+                reasons.append(f"Missing required field(s): {', '.join(missing)}")
+            reasons.extend(invalid)
             result.errors.append(
                 ValidationErrorItem(
                     index=index,
-                    reason=f"Missing required field(s): {', '.join(missing)}",
+                    reason="; ".join(reasons),
                     company_name=record.company_name,
                     title=record.title,
                     source_name=record.source_name,

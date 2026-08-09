@@ -237,7 +237,17 @@ Clean accepted pages into AI extraction inputs:
 .\scripts\uv-local.ps1 run python -m job_radar.cli.clean_pages --pages-file .test_tmp/page_runs/accepted_pages.json --output-file .test_tmp/page_runs/cleaned_pages.json --report-file .test_tmp/page_runs/page_cleaning_report.json --max-text-chars 12000
 ```
 
-`cleaned_pages.json` contains `AIPageInput[]` records with `url`, `final_url`, `title`, cleaned `visible_text`, and selected `important_links` such as attachments or apply links. The original accepted page artifact remains available for audit and retries.
+`cleaned_pages.json` contains `AIPageInput[]` records with cleaned text plus deterministic provenance: source URLs, source metadata, official-source status, and typed links such as attachments or apply links. Only `page_id`, `title`, and `visible_text` are sent to the AI extraction prompt. The program injects provenance and links into extracted records after the semantic response, so the model cannot rewrite them. The original accepted page artifact remains available for audit and retries.
+
+Extract jobs from cleaned pages, then validate, normalize, and deduplicate them without matching or persistence:
+
+```powershell
+.\scripts\uv-local.ps1 run python -m job_radar.cli.extract_jobs --cleaned-pages-file .test_tmp/page_runs/cleaned_pages.json --output-run-dir .test_tmp/page_runs
+```
+
+By default this uses the local Ollama HTTP API with `qwen3.5:cloud`, so the project does not store an API key. Run `ollama signin` and `ollama pull qwen3.5:cloud` first for Ollama cloud models. Override with `--ollama-model` or `--provider codex` if needed.
+
+This writes only `prepared_jobs.json`. Duplicate records, invalid records, and the extraction report are printed to the terminal. `prepared_jobs.json` is the structured, validated, normalized, deduplicated job artifact intended for later `job-understanding` and match analysis.
 
 ## Run Tests
 
