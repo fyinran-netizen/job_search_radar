@@ -49,6 +49,9 @@ Return ONLY a JSON array. Each item must match this CandidateSource schema:
 
 Rules:
 - Prefer official company career pages and concrete job detail pages.
+- Use the SearchPlan cohort fields as hard search intent. If cohort_year is present, search for that exact campus recruitment cohort.
+- Chinese cohort labels mean graduation cohort, not posting year. For example, 2027届 means expected graduation between 2026-09 and 2027-06.
+- If SearchPlan contains cohort_year 2027, prioritize pages and queries containing terms such as 2027届, 2027校招, 2027校园招聘, 2027 graduate, or 2027 Graduate Program. Do not return pages aimed only at 2026届 or 2028届 unless the page explicitly also accepts the 2027 cohort.
 - Include third-party job pages only when they look like real job descriptions.
 - Avoid generic landing pages, login-only pages, forums, SEO pages, application submission pages, and duplicate URLs.
 - Prefer pages matching target role, graduation cohort, location, and company type.

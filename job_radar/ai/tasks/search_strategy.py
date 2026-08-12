@@ -9,6 +9,7 @@ from job_radar.ai.skill_loader import load_skill
 from job_radar.ai.structured_output import validate_model
 from job_radar.models.profile import UserProfile
 from job_radar.models.search import SearchPlan
+from job_radar.profile.cohort import infer_graduation_cohort
 
 
 class SearchPlanBuilderProtocol(Protocol):
@@ -31,17 +32,32 @@ class SearchPlanBuilder:
         """Build a simple search plan from profile preferences."""
 
         keywords = []
+        cohort = infer_graduation_cohort(profile.graduation_date)
         for role in profile.target_roles:
-            keywords.append(f"{role} graduate")
+            if cohort:
+                keywords.append(f"{role} {cohort.cohort_year} graduate")
+                keywords.append(f"{role} {cohort.cohort_label}")
+            else:
+                keywords.append(f"{role} graduate")
         for location in profile.preferred_locations:
-            keywords.append(f"graduate jobs {location}")
+            if cohort:
+                keywords.append(f"{cohort.cohort_year} graduate jobs {location}")
+            else:
+                keywords.append(f"graduate jobs {location}")
         for company_type in profile.preferred_company_types:
-            keywords.append(f"{company_type} graduate program")
+            if cohort:
+                keywords.append(f"{company_type} {cohort.cohort_year} graduate program")
+            else:
+                keywords.append(f"{company_type} graduate program")
         return SearchPlan(
             target_roles=profile.target_roles,
             locations=profile.preferred_locations,
             company_types=profile.preferred_company_types,
             keywords=keywords,
+            cohort_year=cohort.cohort_year if cohort else None,
+            graduation_start=cohort.graduation_start if cohort else None,
+            graduation_end=cohort.graduation_end if cohort else None,
+            cohort_terms=cohort.search_terms if cohort else [],
         )
 
 
@@ -78,7 +94,18 @@ class AISearchPlanBuilder:
         )
         data = self.provider.generate_json(prompt)
         plan = validate_model(data, SearchPlan)
-        return plan.model_copy(update={"keywords": plan.keywords[: self.max_keywords]})
+        cohort = infer_graduation_cohort(profile.graduation_date)
+        updates = {"keywords": plan.keywords[: self.max_keywords]}
+        if cohort:
+            updates.update(
+                {
+                    "cohort_year": plan.cohort_year or cohort.cohort_year,
+                    "graduation_start": plan.graduation_start or cohort.graduation_start,
+                    "graduation_end": plan.graduation_end or cohort.graduation_end,
+                    "cohort_terms": plan.cohort_terms or cohort.search_terms,
+                }
+            )
+        return plan.model_copy(update=updates)
 
 
 class AutoSearchPlanBuilder:

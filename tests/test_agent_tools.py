@@ -6,7 +6,9 @@ from pydantic import TypeAdapter, ValidationError
 from job_radar.agent.orchestrator import JobDiscoveryAgent
 from job_radar.cli.clean_pages import main as clean_pages_cli_main
 from job_radar.cli.collect_pages import main as collect_pages_cli_main
+from job_radar.cli.analyze_matches import main as analyze_matches_cli_main
 from job_radar.cli.extract_jobs import main as extract_jobs_cli_main
+from job_radar.cli.group_prepared_jobs import main as group_prepared_jobs_cli_main
 from job_radar.cli.search_strategy import main as search_strategy_cli_main
 from job_radar.cli.web_search import main as web_search_cli_main
 from job_radar.ai.providers.codex_cli import CodexCliDebugInfo, CodexCliProvider
@@ -20,6 +22,7 @@ from job_radar.ai.tasks.job_extraction import (
     build_ai_page_input,
     extract_important_links,
 )
+from job_radar.ai.tasks.match_analysis import SemanticMatchAnalyzer
 from job_radar.ai.tasks.search_strategy import AISearchPlanBuilder, AutoSearchPlanBuilder, SearchPlanBuilder
 from job_radar.config import load_candidate_sources, load_matching_rules, load_profile
 from job_radar.extractors.llm import LLMJobExtractor, UnconfiguredLLMJobExtractor
@@ -30,6 +33,9 @@ from job_radar.models.profile import UserProfile
 from job_radar.models.tool import PageContent
 from job_radar.pipeline.page_cleaning import clean_page_text, clean_visible_text
 from job_radar.pipeline.page_filter import filter_pages
+from job_radar.pipeline.page_triage import triage_extracted_page, triage_page_before_extraction
+from job_radar.pipeline.deterministic_match import evaluate_deterministic_match
+from job_radar.pipeline.normalization import normalize_records
 from job_radar.pipeline.runner import PipelineRunner
 from job_radar.profile.completeness import ProfileCompletenessChecker
 from job_radar.services.ingestion_service import IngestionService
@@ -44,6 +50,23 @@ from job_radar.utils.paths import CONFIG_DIR
 
 def make_agent() -> JobDiscoveryAgent:
     return JobDiscoveryAgent(job_extractor=RuleBasedJobExtractor(), tool_executor=create_mock_tool_executor())
+
+
+def make_prepared_job(**overrides):
+    data = {
+        "company_name": "Example Bank",
+        "company_type": "Bank",
+        "title": "Information Technology Graduate",
+        "location": "Sydney",
+        "description": "Build internal digital banking systems and data services.",
+        "requirements": "Python SQL backend development 2026 graduates",
+        "graduation_years": ["2026"],
+        "source_name": "Example Bank Careers",
+        "source_url": "https://careers.example/job/1",
+        "is_official": True,
+    }
+    data.update(overrides)
+    return normalize_records([RawJobRecord(**data)])[0]
 
 
 def test_profile_checker_reports_incomplete_profile() -> None:
@@ -82,13 +105,41 @@ def test_profile_checker_requires_graduation_year() -> None:
 
 
 def test_search_plan_builder_generates_keywords() -> None:
-    profile, _, _ = load_profile(CONFIG_DIR)
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Data Analyst"],
+        skills=["Python"],
+        preferred_locations=["Shanghai"],
+        preferred_company_types=["Bank"],
+    )
 
     plan = SearchPlanBuilder().build(profile)
 
-    assert "Data Analyst graduate" in plan.keywords
-    assert "graduate jobs Shanghai" in plan.keywords
-    assert "Bank graduate program" in plan.keywords
+    assert plan.cohort_year == 2026
+    assert plan.graduation_start == "2025-09"
+    assert plan.graduation_end == "2026-06"
+    assert "2026届" in plan.cohort_terms
+    assert "Data Analyst 2026 graduate" in plan.keywords
+    assert "2026 graduate jobs Shanghai" in plan.keywords
+    assert "Bank 2026 graduate program" in plan.keywords
+
+
+def test_search_plan_builder_maps_september_to_next_cohort() -> None:
+    profile = UserProfile(
+        graduation_date="2026-09",
+        target_roles=["Software Engineer"],
+        skills=["Python"],
+        preferred_locations=["Shanghai"],
+        preferred_company_types=["Bank"],
+    )
+
+    plan = SearchPlanBuilder().build(profile)
+
+    assert plan.cohort_year == 2027
+    assert plan.graduation_start == "2026-09"
+    assert plan.graduation_end == "2027-06"
+    assert "2027届" in plan.cohort_terms
+    assert "Software Engineer 2027 graduate" in plan.keywords
 
 
 def test_ai_search_plan_builder_uses_skill_provider() -> None:
@@ -117,14 +168,20 @@ def test_auto_search_plan_builder_falls_back_when_codex_unavailable() -> None:
         def generate_json(self, _prompt):
             raise AssertionError("Codex should not be called when unavailable")
 
-    profile, _, _ = load_profile(CONFIG_DIR)
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Data Analyst"],
+        skills=["Python"],
+        preferred_locations=["Shanghai"],
+        preferred_company_types=["Bank"],
+    )
     builder = AutoSearchPlanBuilder(codex_provider=UnavailableCodexProvider())  # type: ignore[arg-type]
 
     plan = builder.build(profile)
 
     assert builder.last_source == "deterministic"
     assert "not installed or not authenticated" in (builder.last_error or "")
-    assert "Data Analyst graduate" in plan.keywords
+    assert "Data Analyst 2026 graduate" in plan.keywords
 
 
 def test_auto_search_plan_builder_falls_back_when_codex_output_fails() -> None:
@@ -135,24 +192,46 @@ def test_auto_search_plan_builder_falls_back_when_codex_output_fails() -> None:
         def generate_json(self, _prompt):
             raise RuntimeError("bad codex output")
 
-    profile, _, _ = load_profile(CONFIG_DIR)
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Data Analyst"],
+        skills=["Python"],
+        preferred_locations=["Shanghai"],
+        preferred_company_types=["Bank"],
+    )
     builder = AutoSearchPlanBuilder(codex_provider=FailingCodexProvider())  # type: ignore[arg-type]
 
     plan = builder.build(profile)
 
     assert builder.last_source == "deterministic"
     assert builder.last_error == "bad codex output"
-    assert "Data Analyst graduate" in plan.keywords
+    assert "Data Analyst 2026 graduate" in plan.keywords
 
 
-def test_search_strategy_cli_prints_deterministic_plan(capsys) -> None:
-    exit_code = search_strategy_cli_main(["--provider", "deterministic", "--show-meta"])
+def test_search_strategy_cli_prints_deterministic_plan(capsys, tmp_path) -> None:
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "graduation_date": "2026-06",
+                "target_roles": ["Data Analyst"],
+                "skills": ["Python"],
+                "preferred_locations": ["Shanghai"],
+                "preferred_company_types": ["Bank"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = search_strategy_cli_main(
+        ["--provider", "deterministic", "--show-meta", "--profile-file", str(profile_path)]
+    )
 
     captured = capsys.readouterr()
 
     assert exit_code == 0
     assert '"provider": "deterministic"' in captured.out
-    assert "Data Analyst graduate" in captured.out
+    assert "Data Analyst 2026 graduate" in captured.out
 
 
 def test_search_strategy_cli_reports_incomplete_profile(capsys, tmp_path) -> None:
@@ -279,6 +358,173 @@ def test_ollama_provider_parses_message_content_json(monkeypatch) -> None:
     assert captured["body"]["think"] == "low"
 
 
+def test_ollama_provider_sends_system_and_user_messages(monkeypatch) -> None:
+    captured = {}
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b'{"message":{"content":"{\\"ok\\":true}"}}'
+
+    def fake_urlopen(request, timeout=180):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    monkeypatch.setattr("job_radar.ai.providers.ollama.urlopen", fake_urlopen)
+
+    data = OllamaProvider().generate_json("user prompt", system_prompt="system prompt")
+
+    assert data == {"ok": True}
+    assert captured["body"]["messages"] == [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "user prompt"},
+    ]
+
+
+def test_deterministic_match_bypasses_ai_for_graduation_year_mismatch() -> None:
+    job = make_prepared_job(graduation_years=["2027"])
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Software Engineer"],
+        skills=["Python"],
+    )
+
+    result = evaluate_deterministic_match(job, profile)
+    analyzer = SemanticMatchAnalyzer(MockAIProvider({"should_not": "be called"}))
+    assessment = analyzer.analyze(job, profile)
+
+    assert not result.should_call_ai
+    assert result.hard_reject
+    assert assessment.analysis_source == "deterministic"
+    assert assessment.recommendation == "skip"
+    assert assessment.match_score == 0
+    assert "graduation_year_mismatch" in assessment.risk_flags
+
+
+def test_deterministic_match_treats_september_as_next_cohort() -> None:
+    job = make_prepared_job(graduation_years=["2027"])
+    profile = UserProfile(
+        graduation_date="2026-09",
+        target_roles=["Software Engineer"],
+        skills=["Python"],
+    )
+
+    result = evaluate_deterministic_match(job, profile)
+
+    assert result.should_call_ai
+    assert not result.hard_reject
+    assert "graduation_year_mismatch" not in result.risk_flags
+
+
+def test_semantic_match_analyzer_merges_deterministic_risks() -> None:
+    job = make_prepared_job(is_official=False)
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Software Engineer"],
+        skills=["Python", "SQL"],
+    )
+    provider = MockAIProvider(
+        {
+            "match_score": 96,
+            "role_fit": "high",
+            "must_have_fit": "yes",
+            "match_reasons": ["Role involves backend systems relevant to the candidate."],
+            "missing_requirements": ["Cloud stack is not specified."],
+            "risk_flags": ["vague_tech_stack"],
+            "job_summary": "Information technology graduate role building internal banking systems.",
+            "recommendation": "apply",
+            "confidence": "high",
+        }
+    )
+
+    assessment = SemanticMatchAnalyzer(provider).analyze(job, profile)
+
+    assert assessment.analysis_source == "ai_with_deterministic_overrides"
+    assert assessment.match_score == 90
+    assert assessment.recommendation == "apply"
+    assert assessment.confidence == "medium"
+    assert assessment.risk_flags == ["non_official_source", "vague_tech_stack"]
+    assert provider.prompts
+    assert "You are Job Radar's semantic match analysis component." in provider.prompts[0]
+    assert '"candidate_profile"' in provider.prompts[1]
+    assert "fixed scoring rubric" in provider.prompts[0].lower()
+
+
+def test_analyze_matches_cli_writes_structured_assessments(capsys, monkeypatch, tmp_path) -> None:
+    prepared_jobs_path = tmp_path / "prepared_jobs.json"
+    output_path = tmp_path / "match_assessments.json"
+    profile_dir = tmp_path / "config"
+    profile_dir.mkdir()
+    profile_dir.joinpath("profile.yaml").write_text(
+        json.dumps(
+            {
+                "graduation_date": "2026-06",
+                "target_roles": ["Software Engineer"],
+                "skills": ["Python", "SQL"],
+                "preferred_locations": ["Sydney"],
+                "excluded_locations": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    job = make_prepared_job()
+    prepared_jobs_path.write_text(json.dumps([job.model_dump()], ensure_ascii=False), encoding="utf-8")
+
+    class FakeOllamaProvider:
+        def __init__(self, model="qwen3.5:cloud", base_url="http://localhost:11434"):
+            self.model = model
+            self.base_url = base_url
+
+        def is_available(self):
+            return True
+
+        def generate_json(self, prompt, timeout_seconds=180, system_prompt=None):
+            assert system_prompt
+            assert "candidate_profile" in prompt
+            return {
+                "match_score": 82,
+                "role_fit": "high",
+                "must_have_fit": "yes",
+                "match_reasons": ["Backend systems and SQL are relevant."],
+                "missing_requirements": ["Exact framework is not specified."],
+                "risk_flags": [],
+                "job_summary": "Graduate technology role for internal banking systems.",
+                "recommendation": "apply",
+                "confidence": "high",
+            }
+
+    monkeypatch.setattr("job_radar.cli.analyze_matches.OllamaProvider", FakeOllamaProvider)
+
+    exit_code = analyze_matches_cli_main(
+        [
+            "--prepared-jobs-file",
+            str(prepared_jobs_path),
+            "--profile-dir",
+            str(profile_dir),
+            "--output-file",
+            str(output_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assessments = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert report["assessment_count"] == 1
+    assert report["provider"] == "ollama"
+    assert assessments[0]["deduplication_key"] == job.deduplication_key
+    assert assessments[0]["assessment"]["match_score"] == 82
+    assert assessments[0]["assessment"]["analysis_source"] == "ai"
+
+
 def test_parse_json_output_repairs_only_trailing_container_closures() -> None:
     dell_output = (
         '{"page_id":"page-1","page_context":{},"jobs":['
@@ -317,13 +563,23 @@ def test_codex_web_search_tool_validates_candidate_sources() -> None:
             ]
 
     provider = FakeProvider()
-    plan = SearchPlanBuilder().build(load_profile(CONFIG_DIR)[0])
+    plan = SearchPlanBuilder().build(
+        UserProfile(
+            graduation_date="2026-06",
+            target_roles=["Data Analyst"],
+            skills=["Python"],
+            preferred_locations=["Shanghai"],
+            preferred_company_types=["Bank"],
+        )
+    )
 
     sources = CodexWebSearchTool(provider=provider).run(plan)  # type: ignore[arg-type]
 
     assert sources[0].url == "https://careers.example/job/123"
     assert sources[0].relevance_score == 92
     assert "Use web search" in provider.prompt
+    assert '"cohort_year": 2026' in provider.prompt
+    assert "2027届 means expected graduation between 2026-09 and 2027-06" in provider.prompt
 
 
 def test_web_search_cli_prints_mock_sources(capsys, tmp_path) -> None:
@@ -596,6 +852,99 @@ def test_page_filter_rejects_redirected_error_page() -> None:
 
     assert result.accepted_pages == []
     assert any("redirected_to_error_page" in reason for reason in result.rejected_pages[0].reasons)
+
+
+def test_page_triage_marks_apply_portal_pending() -> None:
+    page = PageContent(
+        url="https://careers.pddglobalhr.com/campus/",
+        source_name="PDD Campus Careers",
+        title="拼多多集团-PDD校园招聘官网",
+        text=(
+            "拼多多集团-PDD ｜ 校园招聘 立即投递 校招项目 应届生招聘 "
+            "2027届校园招聘 毕业时间：2026年9月-2027年8月 实习生招聘"
+        ),
+        metadata={
+            "final_url": "https://careers.pddglobalhr.com/campus/",
+            "company_name": "拼多多",
+            "company_type": "Technology",
+            "is_official": True,
+        },
+    )
+
+    pending = triage_page_before_extraction(page)
+
+    assert pending is not None
+    assert pending.pending_kind == "official_apply_portal"
+    assert pending.suggested_next_action == "open_portal_and_find_job_detail_pages"
+    assert pending.company_name == "拼多多"
+
+
+def test_extraction_triage_marks_role_list_without_jd_pending() -> None:
+    page_input = AIPageInput(
+        url="https://career.example/list",
+        source_name="Example Careers",
+        source_company_name="Example Robotics",
+        company_type="Technology",
+        is_official=False,
+        title="2027 campus recruitment role list",
+        visible_text="Role list",
+    )
+    records = [
+        RawJobRecord(
+            company_name="Example Robotics",
+            title=f"算法工程师 {index}",
+            graduation_years=["2027"],
+            apply_url="https://career.example/apply",
+            source_url="https://career.example/list",
+            source_name="Example Careers",
+        )
+        for index in range(12)
+    ]
+
+    pending = triage_extracted_page(page_input, records)
+
+    assert pending is not None
+    assert pending.pending_kind == "role_list_without_jd"
+    assert pending.suggested_next_action == "find_detail_pages_for_role_titles"
+    assert pending.evidence["extracted_job_count"] == 12
+    assert len(pending.role_titles) == 12
+
+
+def test_extraction_triage_marks_small_sparse_role_list_pending() -> None:
+    page_input = AIPageInput(
+        url="https://career.example/notice",
+        source_name="Example Careers",
+        source_company_name="Example Robotics",
+        company_type="Technology",
+        is_official=False,
+        title="2027 campus recruitment notice",
+        visible_text="Software roles apply through the campus portal.",
+    )
+    records = [
+        RawJobRecord(
+            company_name="Example Robotics",
+            title="Motion Control Algorithm Engineer",
+            graduation_years=["2027"],
+            apply_url="https://career.example/campus",
+            source_url="https://career.example/notice",
+            source_name="Example Careers",
+        ),
+        RawJobRecord(
+            company_name="Example Robotics",
+            title="Agent Developer",
+            graduation_years=["2027"],
+            apply_url="https://career.example/campus",
+            source_url="https://career.example/notice",
+            source_name="Example Careers",
+        ),
+    ]
+
+    pending = triage_extracted_page(page_input, records)
+
+    assert pending is not None
+    assert pending.pending_kind == "role_list_without_jd"
+    assert pending.evidence["sparse_record_ratio"] == 1.0
+    assert pending.role_titles == ["Motion Control Algorithm Engineer", "Agent Developer"]
 
 
 def test_collect_pages_cli_filters_local_pages(capsys, tmp_path) -> None:
@@ -1144,6 +1493,28 @@ def test_ai_job_extraction_schema_accepts_empty_jobs_for_later_program_validatio
     assert records == []
 
 
+def test_ai_job_extraction_accepts_single_object_for_single_input_batch() -> None:
+    provider = MockAIProvider(
+        {
+            "page_id": "page-1",
+            "page_context": {"company_name": "Example"},
+            "jobs": [{"title": "Data Analyst Graduate", "location": "Sydney"}],
+        }
+    )
+    page_input = AIPageInput(
+        url="https://careers.example/job/1",
+        source_name="Example Careers",
+        title="Example job",
+        visible_text="Data Analyst Graduate. Location Sydney.",
+    )
+
+    records = AIJobExtractionClient(provider).extract_jobs_from_inputs([page_input])
+
+    assert len(records) == 1
+    assert records[0].company_name == "Example"
+    assert records[0].title == "Data Analyst Graduate"
+
+
 def test_extract_jobs_cli_prepares_cleaned_pages_with_ollama_provider(capsys, monkeypatch, tmp_path) -> None:
     cleaned_pages_path = tmp_path / "cleaned_pages.json"
     run_dir = tmp_path / "job_runs"
@@ -1268,8 +1639,13 @@ def test_extract_jobs_cli_prepares_cleaned_pages_with_ollama_provider(capsys, mo
     report = json.loads(captured.out)
 
     assert exit_code == 0
-    assert sorted(path.name for path in run_dir.iterdir()) == ["prepared_jobs.json"]
+    assert sorted(path.name for path in run_dir.iterdir()) == [
+        "job_extraction_report.json",
+        "pending_followups.json",
+        "prepared_jobs.json",
+    ]
     assert len(prepared_jobs) == 1
+    assert json.loads((run_dir / "pending_followups.json").read_text(encoding="utf-8")) == []
     assert prepared_jobs[0]["normalized_title"] == "data analyst graduate"
     assert prepared_jobs[0]["source_url"] == "https://careers.example/job/1"
     assert prepared_jobs[0]["source_name"] == "Example Careers"
@@ -1290,9 +1666,79 @@ def test_extract_jobs_cli_prepares_cleaned_pages_with_ollama_provider(capsys, mo
     assert "[1-3/3] extracting" in captured.err
     assert "[1-3/3] retrying" in captured.err
     assert "Program reliability validation" in captured.err
-    assert "3 record(s) in " in captured.err
+    assert "3 accepted record(s), 0 pending page(s)" in captured.err
     assert FakeOllamaProvider.calls == 2
     assert "public job posting data" in FakeOllamaProvider.prompts[1]
+
+
+def test_extract_jobs_cli_prefers_extraction_ollama_model(capsys, monkeypatch, tmp_path) -> None:
+    cleaned_pages_path = tmp_path / "cleaned_pages.json"
+    run_dir = tmp_path / "job_runs"
+    cleaned_pages_path.write_text("[]", encoding="utf-8")
+    captured = {}
+
+    class FakeOllamaProvider:
+        def __init__(self, model="qwen3.5:cloud", base_url="http://localhost:11434"):
+            captured["model"] = model
+            self.model = model
+            self.base_url = base_url
+
+        def is_available(self):
+            return True
+
+        def generate_json(self, prompt, timeout_seconds=180):
+            raise AssertionError("No extraction calls are expected for empty input")
+
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen3:8b")
+    monkeypatch.setenv("JOB_RADAR_EXTRACTION_OLLAMA_MODEL", "gpt-oss-20b")
+    monkeypatch.setattr("job_radar.cli.extract_jobs.OllamaProvider", FakeOllamaProvider)
+
+    exit_code = extract_jobs_cli_main(
+        [
+            "--cleaned-pages-file",
+            str(cleaned_pages_path),
+            "--output-run-dir",
+            str(run_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["model"] == "gpt-oss-20b"
+
+
+def test_group_prepared_jobs_cli_writes_company_view(capsys, tmp_path) -> None:
+    prepared_jobs_path = tmp_path / "prepared_jobs.json"
+    output_path = tmp_path / "prepared_companies.json"
+    jobs = [
+        make_prepared_job(company_name="Bank of China", title="Data Analyst", location="Shanghai"),
+        make_prepared_job(company_name="Bank of China", title="Software Engineer", location="Beijing"),
+        make_prepared_job(company_name="Example Tech", title="Backend Engineer", location="Sydney"),
+    ]
+    prepared_jobs_path.write_text(
+        json.dumps([job.model_dump() for job in jobs], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    exit_code = group_prepared_jobs_cli_main(
+        [
+            "--prepared-jobs-file",
+            str(prepared_jobs_path),
+            "--output-file",
+            str(output_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    grouped = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert report["prepared_count"] == 3
+    assert report["company_count"] == 2
+    assert grouped[0]["company_name"] == "Bank of China"
+    assert grouped[0]["job_count"] == 2
+    assert [job["title"] for job in grouped[0]["jobs"]] == ["Data Analyst", "Software Engineer"]
+    assert "company_name" not in grouped[0]["jobs"][0]
 
 
 def test_llm_job_extractor_uses_llm_client_interface(temp_db_path) -> None:

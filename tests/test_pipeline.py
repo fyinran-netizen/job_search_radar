@@ -1,6 +1,7 @@
 from job_radar.config import load_matching_rules, load_profile
 from job_radar.models.job import RawJobRecord
 from job_radar.pipeline.deduplication import deduplicate_records
+from job_radar.pipeline.job_grouping import group_jobs_by_company
 from job_radar.pipeline.job_preparation import prepare_records_for_analysis
 from job_radar.pipeline.matching import match_records
 from job_radar.pipeline.normalization import normalize_records
@@ -130,6 +131,47 @@ def test_prepare_records_for_analysis_stops_before_matching() -> None:
     assert result.prepared_records[0].deduplication_key
     assert result.prepared_records[0].match_score == 0
     assert result.errors
+
+
+def test_group_jobs_by_company_returns_company_first_view() -> None:
+    records = normalize_records(
+        [
+            RawJobRecord(
+                company_name="Bank of China",
+                company_type="Bank",
+                title="Information Technology",
+                location="Beijing",
+                source_name="Bank of China",
+                source_url="https://www.boc.cn/job/1",
+                is_official=True,
+            ),
+            RawJobRecord(
+                company_name="Bank of China",
+                company_type="Bank",
+                title="Data Analyst",
+                location="Shanghai",
+                source_name="Bank of China",
+                source_url="https://www.boc.cn/job/2",
+                is_official=True,
+            ),
+            RawJobRecord(
+                company_name="Example Tech",
+                company_type="Technology",
+                title="Software Engineer",
+                location="Sydney",
+                source_name="Example Careers",
+                source_url="https://careers.example/job/1",
+            ),
+        ]
+    )
+
+    grouped = group_jobs_by_company(records)
+
+    assert [company["company_name"] for company in grouped] == ["Bank of China", "Example Tech"]
+    assert grouped[0]["job_count"] == 2
+    assert grouped[0]["source_names"] == ["Bank of China"]
+    assert [job["title"] for job in grouped[0]["jobs"]] == ["Information Technology", "Data Analyst"]
+    assert "company_name" not in grouped[0]["jobs"][0]
 
 
 def test_matcher_outputs_score_and_reasons() -> None:

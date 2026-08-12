@@ -5,5 +5,6 @@ try:
 except Exception:
     configure_local_runtime_paths = None
 
+
 if configure_local_runtime_paths is not None:
     configure_local_runtime_paths()

@@ -12,8 +12,10 @@ class MockAIProvider(AIProvider):
         self.response = response
         self.prompts: list[str] = []
 
-    def generate_json(self, prompt: str, timeout_seconds: int = 180) -> Any:
+    def generate_json(self, prompt: str, timeout_seconds: int = 180, system_prompt: str | None = None) -> Any:
         """Record the prompt and return the configured response."""
 
+        if system_prompt:
+            self.prompts.append(system_prompt)
         self.prompts.append(prompt)
         return self.response

@@ -61,9 +61,11 @@ class CodexCliProvider(AIProvider):
             return False
         return result.returncode == 0
 
-    def generate_json(self, prompt: str, timeout_seconds: int = 180) -> Any:
+    def generate_json(self, prompt: str, timeout_seconds: int = 180, system_prompt: str | None = None) -> Any:
         """Run Codex CLI and return parsed JSON-compatible data."""
 
+        if system_prompt:
+            prompt = f"System:\n{system_prompt}\n\nUser:\n{prompt}"
         command = [*self._command_prefix(), "exec"]
         self.last_debug_info = CodexCliDebugInfo(command=command, prompt=prompt)
         result = subprocess.run(

@@ -229,7 +229,7 @@ Collect pages and run hard-failure filtering:
 .\scripts\uv-local.ps1 run python -m job_radar.cli.collect_pages --sources-file .test_tmp/candidate_sources_example.json --plan-file .test_tmp/search_plan_example.json --timeout-seconds 15 --snippet-chars 500 --output-run-dir .test_tmp/page_runs
 ```
 
-The terminal output is a compact filter report. `--output-run-dir` overwrites `accepted_pages.json`, `pending_pages.json`, and `page_collection_report.json` in the given artifact directory. The report includes `collected_at` so the current files still record when they were refreshed.
+The terminal output is a compact filter report. `--output-run-dir` overwrites `accepted_pages.json`, `pending_pages.json`, `pending_followups.json`, and `page_collection_report.json` in the given artifact directory. `accepted_pages.json` is ready for cleaning and extraction. `rejected_pages` in the report are hard failures such as closed jobs or bad redirects. `pending_followups.json` keeps useful but unresolved pages for a later agent step, with fields such as `pending_kind`, `reasons`, `evidence`, `suggested_next_action`, `priority`, `role_titles`, and `links`. The report includes `collected_at` so the current files still record when they were refreshed.
 
 Clean accepted pages into AI extraction inputs:
 
@@ -242,12 +242,30 @@ Clean accepted pages into AI extraction inputs:
 Extract jobs from cleaned pages, then validate, normalize, and deduplicate them without matching or persistence:
 
 ```powershell
-.\scripts\uv-local.ps1 run python -m job_radar.cli.extract_jobs --cleaned-pages-file .test_tmp/page_runs/cleaned_pages.json --output-run-dir .test_tmp/page_runs
+uv run python -m job_radar.cli.extract_jobs --cleaned-pages-file .test_tmp/page_runs/cleaned_pages.json --output-run-dir .test_tmp/page_runs
 ```
 
-By default this uses the local Ollama HTTP API with `qwen3.5:cloud`, so the project does not store an API key. Run `ollama signin` and `ollama pull qwen3.5:cloud` first for Ollama cloud models. Override with `--ollama-model` or `--provider codex` if needed.
+By default this uses the local Ollama HTTP API and reads model settings from the private project `.env` file. Override with `--ollama-model` or `--provider codex` if needed.
 
-This writes only `prepared_jobs.json`. Duplicate records, invalid records, and the extraction report are printed to the terminal. `prepared_jobs.json` is the structured, validated, normalized, deduplicated job artifact intended for later `job-understanding` and match analysis.
+The project loads a private root `.env` file during Python startup. Use `OLLAMA_MODEL` for the default local Ollama model used by semantic match analysis, for example `qwen3:8b`. Use `JOB_RADAR_EXTRACTION_OLLAMA_MODEL` when job extraction should use a different local model, for example `gpt-oss:20b-cloud`. Use `OLLAMA_BASE_URL` for the local Ollama HTTP server, normally `http://localhost:11434`.
+
+This writes `prepared_jobs.json` and, when unresolved pages are detected after extraction, `pending_followups.json`. Duplicate records, invalid records, pending follow-ups, and the extraction report are printed to the terminal. `prepared_jobs.json` is the structured, validated, normalized, deduplicated job artifact intended for later `job-understanding` and match analysis; sparse role-list pages stay pending instead of being forced into match analysis.
+
+When a company-first review view is needed, derive it in code with `job_radar.pipeline.job_grouping.group_jobs_by_company(prepared_records)`. That keeps one job-level artifact for downstream analysis while letting review/reporting code show a company such as Bank of China once with its jobs nested underneath.
+
+To write that company-first view from an existing `prepared_jobs.json` artifact:
+
+```powershell
+.\scripts\uv-local.ps1 run python -m job_radar.cli.group_prepared_jobs --prepared-jobs-file .test_tmp/page_runs_2027/prepared_jobs.json --output-file .test_tmp/page_runs_2027/prepared_companies.json
+```
+
+Analyze prepared jobs against the local profile with deterministic hard rules and one Ollama semantic matching call per eligible job:
+
+```powershell
+uv run python -m job_radar.cli.analyze_matches --prepared-jobs-file .test_tmp/page_runs/prepared_jobs.json --output-file .test_tmp/page_runs/match_assessments.json
+```
+
+The CLI is only the execution entry point. Model calls go through `OllamaProvider`, and the semantic matcher uses separate system and user chat messages. Program-owned rules run first and take priority: expired deadlines, explicit graduation-year mismatches, and fully excluded locations bypass AI and return a deterministic `skip`; non-official sources and partial excluded-location matches become deterministic risk flags or score caps. AI returns validated structured JSON, then deterministic caps, risks, and missing requirements are merged into the final assessment.
 
 ## Run Tests
 

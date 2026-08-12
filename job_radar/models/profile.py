@@ -12,6 +12,7 @@ class UserProfile(BaseModel):
     skills: list[str] = Field(default_factory=list)
     preferred_company_types: list[str] = Field(default_factory=list)
     preferred_locations: list[str] = Field(default_factory=list)
+    excluded_locations: list[str] = Field(default_factory=list)
 
 
 class ProfileCompletenessResult(BaseModel):

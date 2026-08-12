@@ -38,17 +38,26 @@ class OllamaProvider(AIProvider):
         except (OSError, HTTPError, URLError):
             return False
 
-    def generate_json(self, prompt: str, timeout_seconds: int = 180) -> Any:
+    def generate_json(self, prompt: str, timeout_seconds: int = 180, system_prompt: str | None = None) -> Any:
         """Call Ollama chat and parse the assistant message as JSON."""
 
+        messages = []
+        if system_prompt:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                }
+            )
+        messages.append(
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        )
         payload = {
             "model": self.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
+            "messages": messages,
             "stream": False,
             "format": "json",
             "think": "low" if self.model.lower().startswith("gpt-oss") else False,

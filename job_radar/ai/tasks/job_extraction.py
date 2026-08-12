@@ -306,7 +306,10 @@ class AIJobExtractionClient:
             },
         )
         data = self.provider.generate_json(prompt, timeout_seconds=self.timeout_seconds)
-        extractions = TypeAdapter(list[PageJobExtraction]).validate_python(data)
+        if isinstance(data, dict) and len(payloads) == 1:
+            extractions = [PageJobExtraction.model_validate(data)]
+        else:
+            extractions = TypeAdapter(list[PageJobExtraction]).validate_python(data)
         extracted_ids = [extraction.page_id for extraction in extractions]
         if len(extracted_ids) != len(set(extracted_ids)):
             raise ValueError("AI extraction returned duplicate page_id values.")

@@ -37,7 +37,9 @@ Return a list of `CandidateSource`-compatible JSON objects:
 3. Third-party pages are acceptable when they expose a real job description and application/source link.
 4. Avoid generic landing pages, login-only pages, forum discussions, SEO pages, and duplicate URLs.
 5. Assign higher `relevance_score` to pages matching the target role, graduation cohort, and location.
-6. Explain why each selected URL is worth fetching.
+6. Treat Chinese campus recruitment cohort labels as graduation cohort labels. For example, `2027届` means expected graduation between `2026-09` and `2027-06`.
+7. If the search plan has `cohort_year` 2027, prefer pages that explicitly mention `2027届`, `2027校招`, `2027校园招聘`, `2027 graduate`, or `2027 Graduate Program`; avoid pages aimed only at 2026届 or 2028届.
+8. Explain why each selected URL is worth fetching.
 
 ## Constraints
 

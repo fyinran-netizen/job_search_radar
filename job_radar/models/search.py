@@ -10,6 +10,10 @@ class SearchPlan(BaseModel):
     locations: list[str] = Field(default_factory=list)
     company_types: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
+    cohort_year: int | None = None
+    graduation_start: str | None = None
+    graduation_end: str | None = None
+    cohort_terms: list[str] = Field(default_factory=list)
 
 
 class CandidateSource(BaseModel):

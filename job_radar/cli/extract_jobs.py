@@ -19,12 +19,14 @@ from job_radar.ai.providers.ollama import OllamaProvider
 from job_radar.ai.tasks.job_extraction import AIJobExtractionClient, AIPageInput
 from job_radar.extractors.rule_based import RuleBasedJobExtractor
 from job_radar.models.job import RawJobRecord
+from job_radar.models.page_triage import PendingFollowup
 from job_radar.models.tool import PageContent
 from job_radar.pipeline.extraction_reliability import (
     ExtractionReliabilityError,
     validate_extracted_page_coverage,
 )
 from job_radar.pipeline.job_preparation import prepare_records_for_analysis
+from job_radar.pipeline.page_triage import triage_extracted_page
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -46,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=8, help="Number of pages per AI extraction call.")
     parser.add_argument(
         "--ollama-model",
-        default=os.environ.get("OLLAMA_MODEL", "qwen3.5:cloud"),
+        default=os.environ.get("JOB_RADAR_EXTRACTION_OLLAMA_MODEL", os.environ.get("OLLAMA_MODEL", "qwen3.5:cloud")),
         help="Ollama model name for --provider ollama.",
     )
     parser.add_argument(
@@ -56,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--output-run-dir", help="Artifact directory for prepared_jobs.json.")
     parser.add_argument("--prepared-jobs-file", help="Optional path for prepared JobRecord[] JSON.")
+    parser.add_argument("--output-report-file", help="Optional path to write the extraction report JSON.")
     args = parser.parse_args(argv)
 
     try:
@@ -71,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     run_started = perf_counter()
     extraction_started = perf_counter()
     try:
-        raw_records, extraction_errors, retry_count = _extract_records(
+        raw_records, extraction_errors, retry_count, pending_followups = _extract_records(
             page_inputs,
             provider_name=args.provider,
             timeout_seconds=args.timeout_seconds,
@@ -92,6 +95,10 @@ def main(argv: list[str] | None = None) -> int:
     preparation = prepare_records_for_analysis(raw_records)
     preparation_seconds = perf_counter() - preparation_started
     errors = [*extraction_errors, *preparation.errors]
+
+    run_dir = Path(args.output_run_dir) if args.output_run_dir else None
+    prior_pending_followups = _load_prior_pending_followups(run_dir) if run_dir else []
+    all_pending_followups = _merge_pending_followups(prior_pending_followups, pending_followups)
     report = {
         "extracted_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "provider": args.provider,
@@ -102,6 +109,9 @@ def main(argv: list[str] | None = None) -> int:
         "duplicate_count": preparation.duplicate_count,
         "prepared_count": len(preparation.prepared_records),
         "extraction_error_count": len(extraction_errors),
+        "new_pending_followup_count": len(pending_followups),
+        "prior_pending_followup_count": len(prior_pending_followups),
+        "pending_followup_count": len(all_pending_followups),
         "retry_count": retry_count,
         "timing": {
             "extraction_seconds": round(extraction_seconds, 3),
@@ -110,20 +120,31 @@ def main(argv: list[str] | None = None) -> int:
         },
         "errors": errors,
         "duplicate_jobs": [record.model_dump() for record in preparation.duplicate_records],
+        "pending_followups": [item.model_dump() for item in all_pending_followups],
     }
 
     prepared_jobs_file = args.prepared_jobs_file
-    if args.output_run_dir:
-        run_dir = Path(args.output_run_dir)
+    output_report_file = args.output_report_file
+    if run_dir:
         prepared_jobs_file = prepared_jobs_file or str(run_dir / "prepared_jobs.json")
+        pending_followups_file = str(run_dir / "pending_followups.json")
+        output_report_file = output_report_file or str(run_dir / "job_extraction_report.json")
         report["artifacts"] = {
             "run_dir": str(run_dir),
             "prepared_jobs_file": prepared_jobs_file,
+            "pending_followups_file": pending_followups_file,
+            "report_file": output_report_file,
         }
+    else:
+        pending_followups_file = None
 
     try:
         if prepared_jobs_file:
             _write_json(prepared_jobs_file, [record.model_dump() for record in preparation.prepared_records])
+        if pending_followups_file:
+            _write_json(pending_followups_file, [item.model_dump() for item in all_pending_followups])
+        if output_report_file:
+            _write_json(output_report_file, report)
     except OSError as exc:
         print(f"Failed to write output file: {exc}", file=sys.stderr)
         return 4
@@ -137,6 +158,35 @@ def _load_cleaned_pages(path: str) -> list[AIPageInput]:
         return TypeAdapter(list[AIPageInput]).validate_python(json.load(file))
 
 
+def _load_prior_pending_followups(run_dir: Path) -> list[PendingFollowup]:
+    collection_report = run_dir / "page_collection_report.json"
+    if collection_report.exists():
+        try:
+            payload = json.loads(collection_report.read_text(encoding="utf-8-sig"))
+            return TypeAdapter(list[PendingFollowup]).validate_python(payload.get("pending_followups", []))
+        except (OSError, json.JSONDecodeError, ValidationError):
+            return []
+
+    pending_file = run_dir / "pending_followups.json"
+    if pending_file.exists():
+        try:
+            payload = json.loads(pending_file.read_text(encoding="utf-8-sig"))
+            return TypeAdapter(list[PendingFollowup]).validate_python(payload)
+        except (OSError, json.JSONDecodeError, ValidationError):
+            return []
+    return []
+
+
+def _merge_pending_followups(
+    prior_items: list[PendingFollowup],
+    new_items: list[PendingFollowup],
+) -> list[PendingFollowup]:
+    merged: dict[tuple[str, str, str], PendingFollowup] = {}
+    for item in [*prior_items, *new_items]:
+        merged[(item.url, item.pending_kind, item.stage)] = item
+    return list(merged.values())
+
+
 def _extract_records(
     page_inputs: list[AIPageInput],
     provider_name: str,
@@ -145,9 +195,10 @@ def _extract_records(
     ollama_model: str,
     ollama_base_url: str,
     max_attempts: int,
-) -> tuple[list[RawJobRecord], list[dict[str, object]], int]:
+) -> tuple[list[RawJobRecord], list[dict[str, object]], int, list]:
     records: list[RawJobRecord] = []
     errors: list[dict[str, object]] = []
+    pending_followups = []
     retry_count = 0
 
     if provider_name in {"codex", "ollama"}:
@@ -220,16 +271,19 @@ def _extract_records(
                 )
                 continue
             elapsed = perf_counter() - batch_started
-            records.extend(_backfill_batch_records(page_records, batch))
+            backfilled_records = _backfill_batch_records(page_records, batch)
+            accepted_records, pending_items = _triage_extracted_records(backfilled_records, batch)
+            records.extend(accepted_records)
+            pending_followups.extend(pending_items)
             _print_batch_progress(
                 "extracted",
                 start + 1,
                 start + len(batch),
                 len(page_inputs),
                 batch,
-                f"{len(page_records)} record(s) in {elapsed:.2f}s",
+                f"{len(accepted_records)} accepted record(s), {len(pending_items)} pending page(s) in {elapsed:.2f}s",
             )
-        return records, errors, retry_count
+        return records, errors, retry_count, pending_followups
 
     extractor = RuleBasedJobExtractor()
     for index, page_input in enumerate(page_inputs, start=1):
@@ -243,20 +297,58 @@ def _extract_records(
             _print_progress("failed", index, len(page_inputs), page_input, f"{exc} in {elapsed:.2f}s")
             continue
         elapsed = perf_counter() - page_started
-        records.extend(_backfill_records(page_records, page_input))
+        backfilled_records = _backfill_records(page_records, page_input)
+        pending = triage_extracted_page(page_input, backfilled_records)
+        if pending:
+            pending_followups.append(pending)
+        else:
+            records.extend(backfilled_records)
         _print_progress(
             "extracted",
             index,
             len(page_inputs),
             page_input,
-            f"{len(page_records)} record(s) in {elapsed:.2f}s",
+            f"{0 if pending else len(backfilled_records)} accepted record(s) in {elapsed:.2f}s",
         )
-    return records, errors, retry_count
+    return records, errors, retry_count, pending_followups
 
 
 def _error_summary(exc: Exception, max_chars: int = 240) -> str:
     text = " ".join(str(exc).split())
     return text if len(text) <= max_chars else text[: max_chars - 3] + "..."
+
+
+def _triage_extracted_records(
+    records: list[RawJobRecord],
+    page_inputs: list[AIPageInput],
+) -> tuple[list[RawJobRecord], list]:
+    accepted_records: list[RawJobRecord] = []
+    pending_followups = []
+    unassigned_records = list(records)
+    for page_input in page_inputs:
+        page_records = [
+            record
+            for record in unassigned_records
+            if _record_belongs_to_page(record, page_input)
+        ]
+        if not page_records and len(page_inputs) == 1:
+            page_records = unassigned_records
+        for record in page_records:
+            if record in unassigned_records:
+                unassigned_records.remove(record)
+        pending = triage_extracted_page(page_input, page_records)
+        if pending:
+            pending_followups.append(pending)
+        else:
+            accepted_records.extend(page_records)
+    accepted_records.extend(unassigned_records)
+    return accepted_records, pending_followups
+
+
+def _record_belongs_to_page(record: RawJobRecord, page_input: AIPageInput) -> bool:
+    if not record.source_url:
+        return False
+    return record.source_url in {page_input.url, page_input.final_url}
 
 
 def _create_ai_provider(provider_name: str, ollama_model: str, ollama_base_url: str) -> AIProvider:
