@@ -28,8 +28,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout-seconds", type=int, default=20)
     parser.add_argument("--snippet-chars", type=int, default=500)
     parser.add_argument(
-        "--output-pages-file",
-        help="Optional path to write accepted PageContent[] with full text, html, and metadata.",
+        "--output-readable-pages-file",
+        help="Optional path to write readable PageContent[] with full text, html, and metadata.",
     )
     parser.add_argument(
         "--output-pending-file",
@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--output-run-dir",
         help=(
-            "Optional artifact directory. Overwrites accepted_pages.json, pending_pages.json, "
+            "Optional artifact directory. Overwrites readable_pages.json, pending_pages.json, "
             "and page_collection_report.json in that directory."
         ),
     )
@@ -99,39 +99,40 @@ def main(argv: list[str] | None = None) -> int:
     result = filter_pages(pages, search_plan=plan, min_text_length=args.min_text_length)
     result.pending_pages.extend(pending_fetches)
     result.rejected_pages.extend(rejected_fetches)
-    triaged_accepted_pages = []
+
+    triaged_readable_pages = []
     pending_followups = [
         pending_followup_from_pending_page(page)
         for page in result.pending_pages
     ]
-    for page in result.accepted_pages:
+    for page in result.readable_pages:
         pending = triage_page_before_extraction(page)
         if pending is None:
-            triaged_accepted_pages.append(page)
+            triaged_readable_pages.append(page)
         else:
             pending_followups.append(pending)
             result.pending_pages.append(_pending_page_from_triage(page, pending))
-    result.accepted_pages = triaged_accepted_pages
+    result.readable_pages = triaged_readable_pages
     summary = _summarize_result(result, plan, args.snippet_chars)
     summary["pending_followup_count"] = len(pending_followups)
     summary["pending_followups"] = [item.model_dump() for item in pending_followups]
     summary["collected_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    output_pages_file = args.output_pages_file
+    output_readable_pages_file = args.output_readable_pages_file
     output_pending_file = args.output_pending_file
     output_pending_followups_file = args.output_pending_followups_file
     output_report_file = args.output_report_file
     try:
         run_dir = Path(args.output_run_dir) if args.output_run_dir else None
         if run_dir:
-            output_pages_file = output_pages_file or str(run_dir / "accepted_pages.json")
+            output_readable_pages_file = output_readable_pages_file or str(run_dir / "readable_pages.json")
             output_pending_file = output_pending_file or str(run_dir / "pending_pages.json")
             output_pending_followups_file = output_pending_followups_file or str(run_dir / "pending_followups.json")
             output_report_file = output_report_file or str(run_dir / "page_collection_report.json")
             summary["artifacts"] = {"run_dir": str(run_dir)}
-        if output_pages_file:
+        if output_readable_pages_file:
             _write_json(
-                output_pages_file,
-                [page.model_dump() for page in result.accepted_pages],
+                output_readable_pages_file,
+                [page.model_dump() for page in result.readable_pages],
             )
         if output_pending_file:
             _write_json(
@@ -149,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     key: value
                     for key, value in {
-                        "accepted_pages_file": output_pages_file,
+                        "readable_pages_file": output_readable_pages_file,
                         "pending_pages_file": output_pending_file,
                         "pending_followups_file": output_pending_followups_file,
                         "report_file": output_report_file,
@@ -216,10 +217,10 @@ def _pending_page_from_triage(page: PageContent, pending: PendingFollowup) -> Pe
 
 def _summarize_result(result, plan: SearchPlan | None, snippet_chars: int) -> dict:
     return {
-        "accepted_count": len(result.accepted_pages),
+        "readable_count": len(result.readable_pages),
         "pending_count": len(result.pending_pages),
         "rejected_count": len(result.rejected_pages),
-        "accepted_pages": [
+        "readable_pages": [
             {
                 "url": page.url,
                 "final_url": page.metadata.get("final_url"),
@@ -230,7 +231,7 @@ def _summarize_result(result, plan: SearchPlan | None, snippet_chars: int) -> di
                 "signals": summarize_page_signals(page, plan),
                 "snippet": page.text[:snippet_chars],
             }
-            for page in result.accepted_pages
+            for page in result.readable_pages
         ],
         "pending_pages": [
             {

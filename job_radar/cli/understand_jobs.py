@@ -1,4 +1,4 @@
-"""Analyze understood jobs against the user profile with deterministic rules and Ollama."""
+"""Understand prepared jobs with basic gates and local Ollama."""
 
 from __future__ import annotations
 
@@ -13,26 +13,26 @@ from time import perf_counter
 from pydantic import TypeAdapter, ValidationError
 
 from job_radar.ai.providers.ollama import OllamaProvider
-from job_radar.ai.tasks.match_analysis import SemanticMatchAnalyzer
+from job_radar.ai.tasks.job_understanding import JobUnderstandingAnalyzer
 from job_radar.config import load_profile
-from job_radar.models.understanding import JobUnderstandingRecord
+from job_radar.models.job import JobRecord
 from job_radar.utils.paths import CONFIG_DIR
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run semantic match analysis for JobUnderstandingRecord[] artifacts."""
+    """Run basic gate and AI job understanding for prepared JobRecord[] artifacts."""
 
     parser = argparse.ArgumentParser(
-        description="Analyze understood jobs with deterministic hard rules and one Ollama semantic matching call per eligible job."
+        description="Understand prepared jobs with deterministic basic gates and one Ollama call per continuing job."
     )
-    parser.add_argument("--job-understandings-file", required=True, help="Path to JobUnderstandingRecord[] JSON.")
+    parser.add_argument("--prepared-jobs-file", required=True, help="Path to prepared JobRecord[] JSON.")
     parser.add_argument("--profile-dir", default=str(CONFIG_DIR), help="Directory containing profile.yaml or profile.example.yaml.")
-    parser.add_argument("--output-file", help="Optional path for FinalMatchAssessment[] JSON.")
-    parser.add_argument("--max-jobs", type=int, help="Optional maximum number of prepared jobs to analyze.")
+    parser.add_argument("--output-file", required=True, help="Path for JobUnderstandingRecord[] JSON.")
+    parser.add_argument("--max-jobs", type=int, help="Optional maximum number of prepared jobs to understand.")
     parser.add_argument("--timeout-seconds", type=int, default=180)
     parser.add_argument(
         "--ollama-model",
-        default=os.environ.get("JOB_RADAR_MATCH_OLLAMA_MODEL", "gpt-oss:20b-cloud"),
+        default=os.environ.get("JOB_RADAR_UNDERSTANDING_OLLAMA_MODEL", "gpt-oss:20b-cloud"),
         help="Ollama model name.",
     )
     parser.add_argument(
@@ -43,33 +43,33 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        records = _load_job_understandings(args.job_understandings_file)
+        jobs = _load_prepared_jobs(args.prepared_jobs_file)
         profile, used_example_profile, profile_path = load_profile(Path(args.profile_dir))
     except (OSError, json.JSONDecodeError, ValidationError) as exc:
-        print(f"Invalid match analysis input: {exc}", file=sys.stderr)
+        print(f"Invalid understanding input: {exc}", file=sys.stderr)
         return 2
 
     if args.max_jobs is not None:
-        records = records[: args.max_jobs]
+        jobs = jobs[: args.max_jobs]
 
     provider = OllamaProvider(model=args.ollama_model, base_url=args.ollama_base_url)
     if not provider.is_available():
         print(
             f"Ollama server is not reachable at {args.ollama_base_url}. "
-            "Start Ollama and sign in with `ollama signin` for cloud models.",
+            "Start Ollama and make sure the selected model is available.",
             file=sys.stderr,
         )
         return 3
 
-    analyzer = SemanticMatchAnalyzer(provider, timeout_seconds=args.timeout_seconds)
+    analyzer = JobUnderstandingAnalyzer(provider, timeout_seconds=args.timeout_seconds)
     started = perf_counter()
-    assessments = []
+    records = []
     errors = []
-    for index, record in enumerate(records, start=1):
-        job = record.job
-        print(f"[{index}/{len(records)}] analyzing: {job.company_name} - {job.title}", file=sys.stderr, flush=True)
+    skipped_count = 0
+    for index, job in enumerate(jobs, start=1):
+        print(f"[{index}/{len(jobs)}] understanding: {job.company_name} - {job.title}", file=sys.stderr, flush=True)
         try:
-            assessment = analyzer.analyze_understanding(record, profile)
+            record = analyzer.understand(job, profile)
         except Exception as exc:
             errors.append(
                 {
@@ -81,30 +81,25 @@ def main(argv: list[str] | None = None) -> int:
                 }
             )
             continue
-        assessments.append(
-            {
-                "deduplication_key": job.deduplication_key,
-                "company_name": job.company_name,
-                "title": job.title,
-                "assessment": assessment.model_dump(),
-            }
-        )
+        if record.source == "skipped_by_basic_gate":
+            skipped_count += 1
+        records.append(record)
 
-    if args.output_file:
-        try:
-            _write_json(args.output_file, assessments)
-        except OSError as exc:
-            print(f"Failed to write output file: {exc}", file=sys.stderr)
-            return 4
+    try:
+        _write_json(args.output_file, [record.model_dump() for record in records])
+    except OSError as exc:
+        print(f"Failed to write output file: {exc}", file=sys.stderr)
+        return 4
 
     report = {
-        "analyzed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "understood_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "provider": "ollama",
         "ollama_model": args.ollama_model,
         "profile_file": str(profile_path),
         "used_example_profile": used_example_profile,
+        "prepared_count": len(jobs),
         "understanding_count": len(records),
-        "assessment_count": len(assessments),
+        "skipped_by_basic_gate_count": skipped_count,
         "error_count": len(errors),
         "errors": errors,
         "artifacts": {
@@ -118,9 +113,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if not errors else 5
 
 
-def _load_job_understandings(path: str) -> list[JobUnderstandingRecord]:
+def _load_prepared_jobs(path: str) -> list[JobRecord]:
     with open(path, encoding="utf-8-sig") as file:
-        return TypeAdapter(list[JobUnderstandingRecord]).validate_python(json.load(file))
+        return TypeAdapter(list[JobRecord]).validate_python(json.load(file))
 
 
 def _write_json(path: str, payload: object) -> None:

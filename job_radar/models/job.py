@@ -53,6 +53,11 @@ class RawJobRecord(BaseModel):
     requirements: str | None = None
     recruitment_type: str | None = None
     graduation_years: list[str] = Field(default_factory=list)
+    graduation_start: str | None = None
+    graduation_end: str | None = None
+    graduation_requirement: str | None = None
+    start_date: str | None = None
+    start_date_text: str | None = None
     published_at: str | None = None
     deadline: str | None = None
     apply_url: str | None = None

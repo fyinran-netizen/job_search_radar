@@ -1,4 +1,4 @@
-"""Clean accepted PageContent records into AI extraction inputs."""
+"""Clean readable PageContent records into AI extraction inputs."""
 
 from __future__ import annotations
 
@@ -16,10 +16,10 @@ from job_radar.pipeline.page_cleaning import clean_page_text
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Convert accepted PageContent[] into cleaned AIPageInput[]."""
+    """Convert readable PageContent[] into cleaned AIPageInput[]."""
 
-    parser = argparse.ArgumentParser(description="Clean accepted pages before AI extraction.")
-    parser.add_argument("--pages-file", required=True, help="Path to accepted PageContent[] JSON.")
+    parser = argparse.ArgumentParser(description="Clean readable pages before AI extraction.")
+    parser.add_argument("--pages-file", required=True, help="Path to readable PageContent[] JSON.")
     parser.add_argument("--output-file", required=True, help="Path to write cleaned AIPageInput[] JSON.")
     parser.add_argument("--report-file", help="Optional path to write cleaning report JSON.")
     parser.add_argument("--max-text-chars", type=int, default=12000)

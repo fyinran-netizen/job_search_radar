@@ -43,6 +43,11 @@ class ExtractedPageContext(BaseModel):
     company_name: str | None = None
     recruitment_type: str | None = None
     graduation_years: list[str | int] = Field(default_factory=list)
+    graduation_start: str | None = None
+    graduation_end: str | None = None
+    graduation_requirement: str | None = None
+    start_date: str | None = None
+    start_date_text: str | None = None
     published_at: str | None = None
     deadline: str | None = None
 
@@ -264,8 +269,9 @@ class AIJobExtractionClient:
                 "page": _semantic_page_payload(payload, "page-1"),
                 "output": (
                     "Return one JSON object with the same page_id, semantic page_context fields, "
-                    "and per-job title, location, description, and requirements. Return every "
-                    "explicitly named position even when one or more job fields are null."
+                    "graduation eligibility fields, start date fields, and per-job title, "
+                    "location, description, and requirements. Return every explicitly named "
+                    "position even when one or more job fields are null."
                     + (f" {retry_instruction}" if retry_instruction else "")
                 ),
             },
@@ -299,8 +305,9 @@ class AIJobExtractionClient:
                 ],
                 "output": (
                     "Return a JSON array with one object per input page. Each object must contain "
-                    "the unchanged page_id, semantic page_context fields, and every explicitly "
-                    "named position, even when one or more job fields are null."
+                    "the unchanged page_id, semantic page_context fields, graduation eligibility "
+                    "fields, start date fields, and every explicitly named position, even when "
+                    "one or more job fields are null."
                     + (f" {retry_instruction}" if retry_instruction else "")
                 ),
             },

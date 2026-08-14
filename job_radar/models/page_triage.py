@@ -13,6 +13,7 @@ PendingKind = Literal[
     "auth_or_interactive_required",
     "insufficient_visible_text",
     "needs_detail_page",
+    "not_job_detail_page",
     "anti_bot_or_rate_limited",
     "no_jobs_extracted",
     "unknown_but_potentially_relevant",

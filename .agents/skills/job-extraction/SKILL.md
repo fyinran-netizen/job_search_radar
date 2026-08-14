@@ -32,6 +32,11 @@ For one input page, return one JSON object:
     "company_name": null,
     "recruitment_type": null,
     "graduation_years": [],
+    "graduation_start": null,
+    "graduation_end": null,
+    "graduation_requirement": null,
+    "start_date": null,
+    "start_date_text": null,
     "published_at": null,
     "deadline": null
   },
@@ -60,8 +65,13 @@ For multiple input pages, return a JSON array containing one such object per pag
 8. Combine multiple locations for the same position into one location string; do not create one job per city.
 9. Extract explicit candidate conditions such as graduate eligibility, degree, major, language, and skill requirements into `requirements`.
 10. Preserve source wording for recruitment type and other raw text; do not translate or normalize values.
-11. Return `null` for unsupported scalar fields and `[]` for missing graduation years; do not guess.
-12. Keep dates in ISO 8601 format when possible.
+11. Treat graduation eligibility, recruitment or program labeling, application dates, and start or onboarding dates as separate semantic facts. Do not infer one from another.
+12. Put only explicit candidate graduation eligibility years in `graduation_years`. Preserve the supporting source wording in `graduation_requirement`.
+13. Put explicit candidate graduation eligibility date bounds in `graduation_start` and `graduation_end` when the page states a concrete window. Use `YYYY-MM` for month precision and `YYYY-MM-DD` for day precision.
+14. Put explicit role, internship, onboarding, joining, or program start timing in `start_date` and preserve the source wording in `start_date_text`. Do not copy start timing into graduation eligibility fields.
+15. Leave scalar date fields `null` and `graduation_years` empty when the source wording is not explicit enough to classify the date semantics.
+16. Return `null` for unsupported scalar fields and `[]` for missing graduation years; do not guess.
+17. Keep dates in ISO 8601 format when possible.
 
 Before returning JSON, compare `jobs` against all named positions found in the full page and add any omitted position. Do not output this coverage check.
 

@@ -21,10 +21,6 @@ from job_radar.extractors.rule_based import RuleBasedJobExtractor
 from job_radar.models.job import RawJobRecord
 from job_radar.models.page_triage import PendingFollowup
 from job_radar.models.tool import PageContent
-from job_radar.pipeline.extraction_reliability import (
-    ExtractionReliabilityError,
-    validate_extracted_page_coverage,
-)
 from job_radar.pipeline.job_preparation import prepare_records_for_analysis
 from job_radar.pipeline.page_triage import triage_extracted_page
 
@@ -48,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=8, help="Number of pages per AI extraction call.")
     parser.add_argument(
         "--ollama-model",
-        default=os.environ.get("JOB_RADAR_EXTRACTION_OLLAMA_MODEL", os.environ.get("OLLAMA_MODEL", "qwen3.5:cloud")),
+        default=os.environ.get("JOB_RADAR_EXTRACTION_OLLAMA_MODEL", "gpt-oss:20b-cloud"),
         help="Ollama model name for --provider ollama.",
     )
     parser.add_argument(
@@ -233,10 +229,6 @@ def _extract_records(
                         batch,
                         retry_instruction=retry_instruction,
                     )
-                    validate_extracted_page_coverage(
-                        page_records,
-                        [page_input.url for page_input in batch],
-                    )
                     break
                 except Exception as exc:
                     last_error = exc
@@ -255,12 +247,7 @@ def _extract_records(
                 elapsed = perf_counter() - batch_started
                 assert last_error is not None
                 for offset, page_input in enumerate(batch, start=start + 1):
-                    stage = (
-                        "reliability_validation"
-                        if isinstance(last_error, ExtractionReliabilityError)
-                        else "extraction"
-                    )
-                    errors.append(_extraction_error(offset, page_input, last_error, stage=stage))
+                    errors.append(_extraction_error(offset, page_input, last_error, stage="extraction"))
                 _print_batch_progress(
                     "failed",
                     start + 1,
@@ -272,8 +259,8 @@ def _extract_records(
                 continue
             elapsed = perf_counter() - batch_started
             backfilled_records = _backfill_batch_records(page_records, batch)
-            accepted_records, pending_items = _triage_extracted_records(backfilled_records, batch)
-            records.extend(accepted_records)
+            prepared_candidate_records, pending_items = _triage_extracted_records(backfilled_records, batch)
+            records.extend(prepared_candidate_records)
             pending_followups.extend(pending_items)
             _print_batch_progress(
                 "extracted",
@@ -281,7 +268,8 @@ def _extract_records(
                 start + len(batch),
                 len(page_inputs),
                 batch,
-                f"{len(accepted_records)} accepted record(s), {len(pending_items)} pending page(s) in {elapsed:.2f}s",
+                f"{len(prepared_candidate_records)} prepared candidate record(s), "
+                f"{len(pending_items)} pending page(s) in {elapsed:.2f}s",
             )
         return records, errors, retry_count, pending_followups
 
@@ -308,7 +296,7 @@ def _extract_records(
             index,
             len(page_inputs),
             page_input,
-            f"{0 if pending else len(backfilled_records)} accepted record(s) in {elapsed:.2f}s",
+            f"{0 if pending else len(backfilled_records)} prepared candidate record(s) in {elapsed:.2f}s",
         )
     return records, errors, retry_count, pending_followups
 
@@ -322,7 +310,7 @@ def _triage_extracted_records(
     records: list[RawJobRecord],
     page_inputs: list[AIPageInput],
 ) -> tuple[list[RawJobRecord], list]:
-    accepted_records: list[RawJobRecord] = []
+    prepared_candidate_records: list[RawJobRecord] = []
     pending_followups = []
     unassigned_records = list(records)
     for page_input in page_inputs:
@@ -340,9 +328,9 @@ def _triage_extracted_records(
         if pending:
             pending_followups.append(pending)
         else:
-            accepted_records.extend(page_records)
-    accepted_records.extend(unassigned_records)
-    return accepted_records, pending_followups
+            prepared_candidate_records.extend(page_records)
+    prepared_candidate_records.extend(unassigned_records)
+    return prepared_candidate_records, pending_followups
 
 
 def _record_belongs_to_page(record: RawJobRecord, page_input: AIPageInput) -> bool:

@@ -82,9 +82,9 @@ class PendingPage(BaseModel):
 
 
 class PageFilterResult(BaseModel):
-    """Accepted, pending, and rejected pages with reasons."""
+    """Readable, pending, and rejected pages with reasons."""
 
-    accepted_pages: list[PageContent] = Field(default_factory=list)
+    readable_pages: list[PageContent] = Field(default_factory=list)
     pending_pages: list[PendingPage] = Field(default_factory=list)
     rejected_pages: list[RejectedPage] = Field(default_factory=list)
 
@@ -125,7 +125,7 @@ def filter_pages(
                 )
             )
             continue
-        result.accepted_pages.append(page)
+        result.readable_pages.append(page)
     return result
 
 

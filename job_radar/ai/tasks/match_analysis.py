@@ -7,13 +7,10 @@ from job_radar.ai.providers.base import AIProvider
 from job_radar.ai.skill_loader import load_skill
 from job_radar.ai.structured_output import validate_model
 from job_radar.models.job import JobRecord
-from job_radar.models.match import (
-    DeterministicMatchResult,
-    FinalMatchAssessment,
-    ScoringRubric,
-    SemanticMatchAssessment,
-)
+from job_radar.models.gate import BasicGateResult
+from job_radar.models.match import FinalMatchAssessment, ScoringRubric, SemanticMatchAssessment
 from job_radar.models.profile import UserProfile
+from job_radar.models.understanding import JobRequirementFacts, JobUnderstandingRecord
 from job_radar.pipeline.deterministic_match import (
     build_deterministic_final,
     evaluate_deterministic_match,
@@ -39,24 +36,42 @@ class SemanticMatchAnalyzer:
     def analyze(self, job: JobRecord, profile: UserProfile) -> FinalMatchAssessment:
         """Analyze one job against a profile."""
 
-        deterministic = evaluate_deterministic_match(job, profile)
-        if not deterministic.should_call_ai:
-            return build_deterministic_final(job, deterministic)
+        basic_gate = evaluate_deterministic_match(job, profile)
+        if not basic_gate.should_continue:
+            return build_deterministic_final(job, basic_gate)
 
-        system_prompt, user_prompt = self._build_prompts(job, profile, deterministic)
+        system_prompt, user_prompt = self._build_prompts(job, profile, basic_gate, None)
         data = self.provider.generate_json(
             user_prompt,
             timeout_seconds=self.timeout_seconds,
             system_prompt=system_prompt,
         )
         semantic = validate_model(data, SemanticMatchAssessment)
-        return merge_match_results(semantic, deterministic)
+        return merge_match_results(semantic, basic_gate)
+
+    def analyze_understanding(self, record: JobUnderstandingRecord, profile: UserProfile) -> FinalMatchAssessment:
+        """Analyze one understood job against a profile."""
+
+        job = record.job
+        basic_gate = record.basic_gate
+        if not basic_gate.should_continue:
+            return build_deterministic_final(job, basic_gate)
+
+        system_prompt, user_prompt = self._build_prompts(job, profile, basic_gate, record.understanding)
+        data = self.provider.generate_json(
+            user_prompt,
+            timeout_seconds=self.timeout_seconds,
+            system_prompt=system_prompt,
+        )
+        semantic = validate_model(data, SemanticMatchAssessment)
+        return merge_match_results(semantic, basic_gate)
 
     def _build_prompts(
         self,
         job: JobRecord,
         profile: UserProfile,
-        deterministic: DeterministicMatchResult,
+        basic_gate: BasicGateResult,
+        understanding: JobRequirementFacts | None,
     ) -> tuple[str, str]:
         skill = load_skill(self.skill_name)
         schema = json.dumps(SemanticMatchAssessment.model_json_schema(), ensure_ascii=False, indent=2)
@@ -73,7 +88,8 @@ class SemanticMatchAnalyzer:
         user_payload: dict[str, Any] = {
             "candidate_profile": profile.model_dump(),
             "prepared_job": _job_payload(job),
-            "deterministic_signals": deterministic.model_dump(),
+            "job_understanding": understanding.model_dump() if understanding else None,
+            "program_basic_gate": basic_gate.model_dump(),
             "scoring_rubric": self.rubric.model_dump(),
             "recommendation_scale": {
                 "apply": "Strong semantic fit and enough evidence.",
@@ -102,6 +118,11 @@ def _job_payload(job: JobRecord) -> dict[str, Any]:
         "requirements": job.requirements,
         "recruitment_type": job.recruitment_type,
         "graduation_years": job.graduation_years,
+        "graduation_start": job.graduation_start,
+        "graduation_end": job.graduation_end,
+        "graduation_requirement": job.graduation_requirement,
+        "start_date": job.start_date,
+        "start_date_text": job.start_date_text,
         "published_at": job.published_at,
         "deadline": job.deadline,
         "source_name": job.source_name,

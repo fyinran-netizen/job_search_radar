@@ -1,4 +1,4 @@
-"""Deterministic page triage for accepted, rejected, and pending queues."""
+"""Deterministic page triage for readable, rejected, and pending queues."""
 
 import re
 from collections import Counter
@@ -141,7 +141,7 @@ def triage_extracted_page(page_input: AIPageInput, records: list[RawJobRecord]) 
         return _pending_from_page_input(
             page_input,
             pending_kind="no_jobs_extracted",
-            reasons=["accepted page produced no job records after extraction"],
+            reasons=["JD-classified page produced no job records after extraction"],
             evidence={"extracted_job_count": 0},
             suggested_next_action="manual_review",
             priority=60,

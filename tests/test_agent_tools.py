@@ -5,10 +5,12 @@ from pydantic import TypeAdapter, ValidationError
 
 from job_radar.agent.orchestrator import JobDiscoveryAgent
 from job_radar.cli.clean_pages import main as clean_pages_cli_main
+from job_radar.cli.classify_pages import main as classify_pages_cli_main
 from job_radar.cli.collect_pages import main as collect_pages_cli_main
 from job_radar.cli.analyze_matches import main as analyze_matches_cli_main
 from job_radar.cli.extract_jobs import main as extract_jobs_cli_main
 from job_radar.cli.group_prepared_jobs import main as group_prepared_jobs_cli_main
+from job_radar.cli.understand_jobs import main as understand_jobs_cli_main
 from job_radar.cli.search_strategy import main as search_strategy_cli_main
 from job_radar.cli.web_search import main as web_search_cli_main
 from job_radar.ai.providers.codex_cli import CodexCliDebugInfo, CodexCliProvider
@@ -22,6 +24,7 @@ from job_radar.ai.tasks.job_extraction import (
     build_ai_page_input,
     extract_important_links,
 )
+from job_radar.ai.tasks.job_understanding import JobUnderstandingAnalyzer
 from job_radar.ai.tasks.match_analysis import SemanticMatchAnalyzer
 from job_radar.ai.tasks.search_strategy import AISearchPlanBuilder, AutoSearchPlanBuilder, SearchPlanBuilder
 from job_radar.config import load_candidate_sources, load_matching_rules, load_profile
@@ -31,9 +34,11 @@ from job_radar.models.job import RawJobRecord
 from job_radar.models.search import CandidateSource, SearchPlan
 from job_radar.models.profile import UserProfile
 from job_radar.models.tool import PageContent
+from job_radar.models.understanding import JobUnderstandingRecord
 from job_radar.pipeline.page_cleaning import clean_page_text, clean_visible_text
 from job_radar.pipeline.page_filter import filter_pages
 from job_radar.pipeline.page_triage import triage_extracted_page, triage_page_before_extraction
+from job_radar.pipeline.basic_gate import evaluate_basic_gate
 from job_radar.pipeline.deterministic_match import evaluate_deterministic_match
 from job_radar.pipeline.normalization import normalize_records
 from job_radar.pipeline.runner import PipelineRunner
@@ -389,7 +394,7 @@ def test_ollama_provider_sends_system_and_user_messages(monkeypatch) -> None:
 
 
 def test_deterministic_match_bypasses_ai_for_graduation_year_mismatch() -> None:
-    job = make_prepared_job(graduation_years=["2027"])
+    job = make_prepared_job(graduation_years=["2027"], graduation_requirement="2027 graduates only")
     profile = UserProfile(
         graduation_date="2026-06",
         target_roles=["Software Engineer"],
@@ -421,6 +426,112 @@ def test_deterministic_match_treats_september_as_next_cohort() -> None:
     assert result.should_call_ai
     assert not result.hard_reject
     assert "graduation_year_mismatch" not in result.risk_flags
+
+
+def test_basic_gate_uses_clear_pre_understanding_names() -> None:
+    job = make_prepared_job(graduation_years=["2027"], graduation_requirement="2027 graduates only")
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Policy Analyst"],
+        skills=["policy writing"],
+    )
+
+    result = evaluate_basic_gate(job, profile)
+
+    assert result.decision == "skip"
+    assert not result.should_continue
+    assert result.gate_reasons == ["Graduation year eligibility does not match."]
+    assert "graduation_year_mismatch" in result.risk_flags
+
+
+def test_basic_gate_keeps_ambiguous_graduation_year_mismatch_for_understanding() -> None:
+    job = make_prepared_job(
+        title="Software Dev Engineer Intern 2026 Shanghai",
+        requirements="Build services with Java and distributed systems.",
+        graduation_years=["2026"],
+        graduation_requirement=None,
+    )
+    profile = UserProfile(
+        graduation_date="2027-06",
+        target_roles=["Software Engineer"],
+        skills=["Python"],
+    )
+
+    result = evaluate_basic_gate(job, profile)
+
+    assert result.should_continue
+    assert not result.hard_reject
+    assert any(flag.startswith("ambiguous_graduation_year_mismatch") for flag in result.risk_flags)
+
+
+def test_basic_gate_rejects_explicit_graduation_window_mismatch() -> None:
+    job = make_prepared_job(
+        graduation_years=[],
+        graduation_start="2025-09",
+        graduation_end="2026-08",
+        graduation_requirement="Candidates must graduate between 2025-09 and 2026-08.",
+    )
+    profile = UserProfile(
+        graduation_date="2027-06",
+        target_roles=["Software Engineer"],
+        skills=["Python"],
+    )
+
+    result = evaluate_basic_gate(job, profile)
+
+    assert result.decision == "skip"
+    assert result.hard_reject
+    assert "graduation_window_mismatch" in result.risk_flags
+
+
+def test_job_understanding_analyzer_returns_discipline_neutral_facts() -> None:
+    job = make_prepared_job(
+        title="Policy Graduate",
+        description="Prepare policy briefs and consult stakeholders on public programs.",
+        requirements="Strong written communication, research judgment, and 2026 graduates.",
+    )
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Policy Analyst"],
+        skills=["writing", "research"],
+    )
+    provider = MockAIProvider(
+        {
+            "canonical_role": "Policy Graduate",
+            "role_family": "policy",
+            "seniority": "graduate",
+            "responsibilities": ["Prepare policy briefs.", "Consult stakeholders."],
+            "hard_requirements": [
+                {
+                    "category": "communication",
+                    "importance": "hard",
+                    "text": "Strong written communication.",
+                    "evidence": "Strong written communication",
+                }
+            ],
+            "preferred_requirements": [],
+            "eligibility_constraints": [
+                {
+                    "category": "graduation_or_cohort",
+                    "importance": "hard",
+                    "text": "Open to 2026 graduates.",
+                    "evidence": "2026 graduates",
+                }
+            ],
+            "work_context": ["Public programs."],
+            "risk_flags": [],
+            "evidence": ["Prepare policy briefs", "Strong written communication"],
+            "confidence": "high",
+        }
+    )
+
+    record = JobUnderstandingAnalyzer(provider).understand(job, profile)
+
+    assert record.source == "ai"
+    assert record.basic_gate.decision == "continue"
+    assert record.understanding is not None
+    assert record.understanding.hard_requirements[0].category == "communication"
+    assert "technical_skill" not in provider.prompts[1]
 
 
 def test_semantic_match_analyzer_merges_deterministic_risks() -> None:
@@ -458,7 +569,7 @@ def test_semantic_match_analyzer_merges_deterministic_risks() -> None:
 
 
 def test_analyze_matches_cli_writes_structured_assessments(capsys, monkeypatch, tmp_path) -> None:
-    prepared_jobs_path = tmp_path / "prepared_jobs.json"
+    job_understandings_path = tmp_path / "job_understandings.json"
     output_path = tmp_path / "match_assessments.json"
     profile_dir = tmp_path / "config"
     profile_dir.mkdir()
@@ -475,7 +586,27 @@ def test_analyze_matches_cli_writes_structured_assessments(capsys, monkeypatch, 
         encoding="utf-8",
     )
     job = make_prepared_job()
-    prepared_jobs_path.write_text(json.dumps([job.model_dump()], ensure_ascii=False), encoding="utf-8")
+    basic_gate = evaluate_basic_gate(
+        job,
+        UserProfile(
+            graduation_date="2026-06",
+            target_roles=["Software Engineer"],
+            skills=["Python", "SQL"],
+        ),
+    )
+    understanding_record = JobUnderstandingRecord(
+        deduplication_key=job.deduplication_key,
+        company_name=job.company_name or "",
+        title=job.title or "",
+        job=job,
+        basic_gate=basic_gate,
+        understanding=None,
+        source="ai",
+    )
+    job_understandings_path.write_text(
+        json.dumps([understanding_record.model_dump()], ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     class FakeOllamaProvider:
         def __init__(self, model="qwen3.5:cloud", base_url="http://localhost:11434"):
@@ -488,6 +619,7 @@ def test_analyze_matches_cli_writes_structured_assessments(capsys, monkeypatch, 
         def generate_json(self, prompt, timeout_seconds=180, system_prompt=None):
             assert system_prompt
             assert "candidate_profile" in prompt
+            assert "job_understanding" in prompt
             return {
                 "match_score": 82,
                 "role_fit": "high",
@@ -504,8 +636,8 @@ def test_analyze_matches_cli_writes_structured_assessments(capsys, monkeypatch, 
 
     exit_code = analyze_matches_cli_main(
         [
-            "--prepared-jobs-file",
-            str(prepared_jobs_path),
+            "--job-understandings-file",
+            str(job_understandings_path),
             "--profile-dir",
             str(profile_dir),
             "--output-file",
@@ -523,6 +655,95 @@ def test_analyze_matches_cli_writes_structured_assessments(capsys, monkeypatch, 
     assert assessments[0]["deduplication_key"] == job.deduplication_key
     assert assessments[0]["assessment"]["match_score"] == 82
     assert assessments[0]["assessment"]["analysis_source"] == "ai"
+
+
+def test_understand_jobs_cli_writes_understanding_artifacts(capsys, monkeypatch, tmp_path) -> None:
+    prepared_jobs_path = tmp_path / "prepared_jobs.json"
+    output_path = tmp_path / "job_understandings.json"
+    profile_dir = tmp_path / "config"
+    profile_dir.mkdir()
+    profile_dir.joinpath("profile.yaml").write_text(
+        json.dumps(
+            {
+                "graduation_date": "2026-06",
+                "target_roles": ["Policy Analyst"],
+                "skills": ["writing", "research"],
+                "preferred_locations": ["Sydney"],
+                "excluded_locations": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    job = make_prepared_job(
+        title="Policy Graduate",
+        description="Prepare policy briefs and consult stakeholders.",
+        requirements="Strong written communication and 2026 graduates.",
+    )
+    prepared_jobs_path.write_text(json.dumps([job.model_dump()], ensure_ascii=False), encoding="utf-8")
+
+    class FakeOllamaProvider:
+        def __init__(self, model="qwen3:8b", base_url="http://localhost:11434"):
+            self.model = model
+            self.base_url = base_url
+
+        def is_available(self):
+            return True
+
+        def generate_json(self, prompt, timeout_seconds=180, system_prompt=None):
+            assert system_prompt
+            assert "program_basic_gate" in prompt
+            return {
+                "canonical_role": "Policy Graduate",
+                "role_family": "policy",
+                "seniority": "graduate",
+                "responsibilities": ["Prepare policy briefs.", "Consult stakeholders."],
+                "hard_requirements": [
+                    {
+                        "category": "communication",
+                        "importance": "hard",
+                        "text": "Strong written communication.",
+                        "evidence": "Strong written communication",
+                    }
+                ],
+                "preferred_requirements": [],
+                "eligibility_constraints": [
+                    {
+                        "category": "graduation_or_cohort",
+                        "importance": "hard",
+                        "text": "Open to 2026 graduates.",
+                        "evidence": "2026 graduates",
+                    }
+                ],
+                "work_context": [],
+                "risk_flags": [],
+                "evidence": ["Prepare policy briefs", "Strong written communication"],
+                "confidence": "high",
+            }
+
+    monkeypatch.setattr("job_radar.cli.understand_jobs.OllamaProvider", FakeOllamaProvider)
+
+    exit_code = understand_jobs_cli_main(
+        [
+            "--prepared-jobs-file",
+            str(prepared_jobs_path),
+            "--profile-dir",
+            str(profile_dir),
+            "--output-file",
+            str(output_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    records = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert report["ollama_model"] == "gpt-oss:20b-cloud"
+    assert report["understanding_count"] == 1
+    assert records[0]["source"] == "ai"
+    assert records[0]["job"]["deduplication_key"] == job.deduplication_key
+    assert records[0]["basic_gate"]["decision"] == "continue"
+    assert records[0]["understanding"]["hard_requirements"][0]["category"] == "communication"
 
 
 def test_parse_json_output_repairs_only_trailing_container_closures() -> None:
@@ -753,7 +974,7 @@ def test_page_filter_accepts_job_like_page() -> None:
 
     result = filter_pages([page], min_text_length=80)
 
-    assert result.accepted_pages == [page]
+    assert result.readable_pages == [page]
     assert result.rejected_pages == []
 
 
@@ -768,7 +989,7 @@ def test_page_filter_rejects_obvious_non_job_page() -> None:
 
     result = filter_pages([page], min_text_length=80)
 
-    assert result.accepted_pages == []
+    assert result.readable_pages == []
     assert result.rejected_pages[0].url == "https://careers.example/login"
     assert any("auth_wall" in reason for reason in result.rejected_pages[0].reasons)
 
@@ -788,7 +1009,7 @@ def test_page_filter_does_not_reject_job_page_for_nav_login_words() -> None:
 
     result = filter_pages([page], min_text_length=80)
 
-    assert result.accepted_pages == [page]
+    assert result.readable_pages == [page]
     assert result.rejected_pages == []
 
 
@@ -815,7 +1036,7 @@ def test_page_filter_keeps_redirected_detail_to_listing_page() -> None:
 
     result = filter_pages([page], search_plan=plan, min_text_length=80)
 
-    assert result.accepted_pages == [page]
+    assert result.readable_pages == [page]
     assert result.rejected_pages == []
 
 
@@ -830,7 +1051,7 @@ def test_page_filter_marks_short_collectable_page_pending() -> None:
 
     result = filter_pages([page], min_text_length=300)
 
-    assert result.accepted_pages == []
+    assert result.readable_pages == []
     assert result.pending_pages[0].url == page.url
     assert any("insufficient_visible_text" in reason for reason in result.pending_pages[0].reasons)
     assert result.rejected_pages == []
@@ -850,7 +1071,7 @@ def test_page_filter_rejects_redirected_error_page() -> None:
 
     result = filter_pages([page], min_text_length=30)
 
-    assert result.accepted_pages == []
+    assert result.readable_pages == []
     assert any("redirected_to_error_page" in reason for reason in result.rejected_pages[0].reasons)
 
 
@@ -968,7 +1189,7 @@ def test_collect_pages_cli_filters_local_pages(capsys, tmp_path) -> None:
         encoding="utf-8",
     )
     sources_path = tmp_path / "sources.json"
-    pages_path = tmp_path / "accepted_pages.json"
+    pages_path = tmp_path / "readable_pages.json"
     sources_path.write_text(
         f"""
         [
@@ -1003,7 +1224,7 @@ def test_collect_pages_cli_filters_local_pages(capsys, tmp_path) -> None:
             "50",
             "--snippet-chars",
             "20",
-            "--output-pages-file",
+            "--output-readable-pages-file",
             str(pages_path),
         ]
     )
@@ -1012,7 +1233,7 @@ def test_collect_pages_cli_filters_local_pages(capsys, tmp_path) -> None:
     saved_pages = json.loads(pages_path.read_text(encoding="utf-8"))
 
     assert exit_code == 0
-    assert '"accepted_count": 1' in captured.out
+    assert '"readable_count": 1' in captured.out
     assert '"pending_count": 0' in captured.out
     assert '"rejected_count": 1' in captured.out
     assert "Data Analyst Graduate 2026" in captured.out
@@ -1069,7 +1290,7 @@ def test_collect_pages_cli_overwrites_run_artifacts(capsys, tmp_path) -> None:
     )
 
     captured = capsys.readouterr()
-    pages_path = runs_dir / "accepted_pages.json"
+    pages_path = runs_dir / "readable_pages.json"
     pending_path = runs_dir / "pending_pages.json"
     report_path = runs_dir / "page_collection_report.json"
     saved_pages = TypeAdapter(list[PageContent]).validate_python(
@@ -1086,9 +1307,101 @@ def test_collect_pages_cli_overwrites_run_artifacts(capsys, tmp_path) -> None:
     assert saved_pages[0].title == "Business Analyst Graduate 2026"
     assert saved_report["collected_at"]
     assert saved_report["artifacts"]["run_dir"] == str(runs_dir)
-    assert saved_report["artifacts"]["accepted_pages_file"] == str(pages_path)
+    assert saved_report["artifacts"]["readable_pages_file"] == str(pages_path)
     assert saved_report["artifacts"]["pending_pages_file"] == str(pending_path)
-    assert "accepted_pages_file" in captured.out
+    assert "readable_pages_file" in captured.out
+
+
+def test_classify_pages_cli_writes_clear_jd_pages_and_pending_followups(capsys, monkeypatch, tmp_path) -> None:
+    pages_path = tmp_path / "cleaned_pages.json"
+    output_pages_path = tmp_path / "jd_cleaned_pages.json"
+    output_pending_path = tmp_path / "pending_followups.json"
+    output_report_path = tmp_path / "page_classification_report.json"
+    pages_path.write_text(
+        json.dumps(
+            [
+                AIPageInput(
+                    url="https://careers.example/job/1",
+                    source_name="Example Careers",
+                    source_company_name="Example",
+                    company_type="Technology",
+                    is_official=True,
+                    title="Software Engineer Graduate",
+                    visible_text=(
+                        "Software Engineer Graduate. Responsibilities include building backend systems. "
+                        "Requirements include Python and SQL. Location Sydney."
+                    ),
+                    final_url="https://careers.example/job/1",
+                ).model_dump(),
+                AIPageInput(
+                    url="https://careers.example/early-careers",
+                    source_name="Example Careers",
+                    source_company_name="Example",
+                    company_type="Technology",
+                    is_official=True,
+                    title="Early Careers",
+                    visible_text="Explore graduate programs and search jobs.",
+                    final_url="https://careers.example/early-careers",
+                ).model_dump(),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeOllamaProvider:
+        def __init__(self, model="qwen3:8b", base_url="http://localhost:11434"):
+            self.model = model
+            self.base_url = base_url
+
+        def is_available(self):
+            return True
+
+        def generate_json(self, prompt, timeout_seconds=90, system_prompt=None):
+            if "Software Engineer Graduate" in prompt:
+                return {
+                    "is_job_detail_page": True,
+                    "reasons": ["visible text contains responsibilities and requirements"],
+                    "evidence": ["Responsibilities include building backend systems."],
+                    "confidence": "high",
+                }
+            return {
+                "is_job_detail_page": False,
+                "pending_kind": "official_apply_portal",
+                "suggested_next_action": "open_portal_and_find_job_detail_pages",
+                "reasons": ["visible text is an early careers portal"],
+                "evidence": ["Explore graduate programs and search jobs."],
+                "confidence": "high",
+            }
+
+    monkeypatch.setattr("job_radar.cli.classify_pages.OllamaProvider", FakeOllamaProvider)
+
+    exit_code = classify_pages_cli_main(
+        [
+            "--cleaned-pages-file",
+            str(pages_path),
+            "--output-jd-cleaned-pages-file",
+            str(output_pages_path),
+            "--output-pending-followups-file",
+            str(output_pending_path),
+            "--output-report-file",
+            str(output_report_path),
+        ]
+    )
+
+    report = json.loads(capsys.readouterr().out)
+    jd_pages = json.loads(output_pages_path.read_text(encoding="utf-8"))
+    pending_followups = json.loads(output_pending_path.read_text(encoding="utf-8"))
+    saved_report = json.loads(output_report_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert report["jd_page_count"] == 1
+    assert report["pending_followup_count"] == 1
+    assert report["ollama_model"] == "qwen3:8b"
+    assert saved_report["jd_page_count"] == 1
+    assert jd_pages[0]["url"] == "https://careers.example/job/1"
+    assert jd_pages[0]["visible_text"].startswith("Software Engineer Graduate")
+    assert pending_followups[0]["url"] == "https://careers.example/early-careers"
+    assert pending_followups[0]["pending_kind"] == "official_apply_portal"
 
 
 def test_rule_based_extractor_structures_job_detail_page(temp_db_path) -> None:
@@ -1338,7 +1651,7 @@ def test_clean_page_text_prefers_trafilatura_html() -> None:
 
 
 def test_clean_pages_cli_writes_ai_page_inputs(capsys, tmp_path) -> None:
-    pages_path = tmp_path / "accepted_pages.json"
+    pages_path = tmp_path / "readable_pages.json"
     output_path = tmp_path / "cleaned_pages.json"
     report_path = tmp_path / "cleaning_report.json"
     pages_path.write_text(
@@ -1574,15 +1887,6 @@ def test_extract_jobs_cli_prepares_cleaned_pages_with_ollama_provider(capsys, mo
         def generate_json(self, prompt, timeout_seconds=180):
             type(self).calls += 1
             type(self).prompts.append(prompt)
-            if type(self).calls == 1:
-                return [
-                    {
-                        "page_id": f"page-{index}",
-                        "page_context": {"company_name": "Example"},
-                        "jobs": [],
-                    }
-                    for index in range(1, 4)
-                ]
             return [
                 {
                     "page_id": "page-1",
@@ -1658,17 +1962,74 @@ def test_extract_jobs_cli_prepares_cleaned_pages_with_ollama_provider(capsys, mo
     assert report["prepared_count"] == 1
     assert report["duplicate_count"] == 1
     assert report["provider"] == "ollama"
-    assert report["retry_count"] == 1
+    assert report["retry_count"] == 0
     assert report["timing"]["extraction_seconds"] >= 0
     assert report["timing"]["preparation_seconds"] >= 0
     assert report["timing"]["total_seconds"] >= report["timing"]["extraction_seconds"]
     assert "Loaded 3 cleaned page(s). Provider: ollama." in captured.err
     assert "[1-3/3] extracting" in captured.err
-    assert "[1-3/3] retrying" in captured.err
-    assert "Program reliability validation" in captured.err
-    assert "3 accepted record(s), 0 pending page(s)" in captured.err
-    assert FakeOllamaProvider.calls == 2
-    assert "public job posting data" in FakeOllamaProvider.prompts[1]
+    assert "3 prepared candidate record(s), 0 pending page(s)" in captured.err
+    assert FakeOllamaProvider.calls == 1
+
+
+def test_extract_jobs_cli_moves_pages_without_extracted_jobs_to_pending(capsys, monkeypatch, tmp_path) -> None:
+    cleaned_pages_path = tmp_path / "cleaned_pages.json"
+    run_dir = tmp_path / "job_runs"
+    cleaned_pages_path.write_text(
+        json.dumps(
+            [
+                {
+                    "url": "https://careers.example/portal",
+                    "final_url": "https://careers.example/portal",
+                    "source_name": "Example Careers",
+                    "source_company_name": "Example",
+                    "company_type": "Technology",
+                    "is_official": True,
+                    "title": "Example Graduate Portal",
+                    "visible_text": "Search graduate programs and apply online.",
+                    "important_links": [],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeOllamaProvider:
+        def __init__(self, model="gpt-oss:20b-cloud", base_url="http://localhost:11434"):
+            self.model = model
+            self.base_url = base_url
+
+        def is_available(self):
+            return True
+
+        def generate_json(self, prompt, timeout_seconds=180):
+            return {
+                "page_id": "page-1",
+                "page_context": {"company_name": "Example"},
+                "jobs": [],
+            }
+
+    monkeypatch.setattr("job_radar.cli.extract_jobs.OllamaProvider", FakeOllamaProvider)
+
+    exit_code = extract_jobs_cli_main(
+        [
+            "--cleaned-pages-file",
+            str(cleaned_pages_path),
+            "--output-run-dir",
+            str(run_dir),
+        ]
+    )
+
+    report = json.loads(capsys.readouterr().out)
+    prepared_jobs = json.loads((run_dir / "prepared_jobs.json").read_text(encoding="utf-8"))
+    pending_followups = json.loads((run_dir / "pending_followups.json").read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert prepared_jobs == []
+    assert report["prepared_count"] == 0
+    assert report["extraction_error_count"] == 0
+    assert report["new_pending_followup_count"] == 1
+    assert pending_followups[0]["pending_kind"] == "no_jobs_extracted"
 
 
 def test_extract_jobs_cli_prefers_extraction_ollama_model(capsys, monkeypatch, tmp_path) -> None:
@@ -1689,7 +2050,6 @@ def test_extract_jobs_cli_prefers_extraction_ollama_model(capsys, monkeypatch, t
         def generate_json(self, prompt, timeout_seconds=180):
             raise AssertionError("No extraction calls are expected for empty input")
 
-    monkeypatch.setenv("OLLAMA_MODEL", "qwen3:8b")
     monkeypatch.setenv("JOB_RADAR_EXTRACTION_OLLAMA_MODEL", "gpt-oss-20b")
     monkeypatch.setattr("job_radar.cli.extract_jobs.OllamaProvider", FakeOllamaProvider)
 
