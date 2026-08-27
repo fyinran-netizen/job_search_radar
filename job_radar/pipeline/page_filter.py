@@ -1,9 +1,11 @@
-"""Deterministic page filtering before AI job extraction."""
+"""Stage 1 deterministic page routing before AI semantic classification."""
 
+import re
 from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel, Field
 
+from job_radar.models.page_triage import PageTechnicalRoute, PendingFollowup, RecoverySource
 from job_radar.models.search import SearchPlan
 from job_radar.models.tool import PageContent
 
@@ -94,39 +96,86 @@ def filter_pages(
     search_plan: SearchPlan | None = None,
     min_text_length: int = 300,
 ) -> PageFilterResult:
-    """Classify collected pages before AI extraction."""
+    """Route collected pages by technical readability before AI semantics."""
 
     result = PageFilterResult()
     for page in pages:
-        reasons = rejection_reasons(page, search_plan=search_plan, min_text_length=min_text_length)
-        if reasons:
+        route = route_page_technically(page, search_plan=search_plan, min_text_length=min_text_length)
+        if route.status == "rejected":
             result.rejected_pages.append(
                 RejectedPage(
                     url=page.url,
                     source_name=page.source_name,
                     title=page.title,
-                    reasons=reasons,
-                    text_length=len(page.text),
-                    metadata=page.metadata,
+                    reasons=route.reasons,
+                    text_length=route.text_length,
+                    metadata={**page.metadata, "technical_route": route.model_dump()},
                 )
             )
             continue
-        pending = pending_reasons(page, search_plan=search_plan, min_text_length=min_text_length)
-        if pending:
+        if route.status == "recoverable":
             result.pending_pages.append(
                 PendingPage(
                     url=page.url,
                     source_name=page.source_name,
                     title=page.title,
-                    reasons=pending,
-                    text_length=len(page.text),
-                    metadata=page.metadata,
+                    reasons=route.reasons,
+                    text_length=route.text_length,
+                    metadata={**page.metadata, "technical_route": route.model_dump()},
                     page=page,
                 )
             )
             continue
         result.readable_pages.append(page)
     return result
+
+
+def route_page_technically(
+    page: PageContent,
+    search_plan: SearchPlan | None = None,
+    min_text_length: int = 300,
+) -> PageTechnicalRoute:
+    """Return the program-owned Stage 1 route for one fetched page."""
+
+    rejection = rejection_reasons(page, search_plan=search_plan, min_text_length=min_text_length)
+    recovery_sources = _recovery_sources(page)
+    evidence = {
+        "status_code": page.metadata.get("status_code"),
+        "final_url": page.metadata.get("final_url"),
+        "content_type": page.metadata.get("content_type"),
+        "text_length": len(page.text.strip()),
+        "html_length": len(page.html),
+    }
+    if rejection:
+        return PageTechnicalRoute(
+            status="rejected",
+            reason_codes=[_reason_code(reason) for reason in rejection],
+            reasons=rejection,
+            text_length=len(page.text),
+            html_length=len(page.html),
+            recovery_sources=recovery_sources,
+            evidence=evidence,
+        )
+
+    pending = pending_reasons(page, search_plan=search_plan, min_text_length=min_text_length)
+    if pending:
+        return PageTechnicalRoute(
+            status="recoverable",
+            reason_codes=[_reason_code(reason) for reason in pending],
+            reasons=pending,
+            text_length=len(page.text),
+            html_length=len(page.html),
+            recovery_sources=recovery_sources,
+            evidence=evidence,
+        )
+
+    return PageTechnicalRoute(
+        status="readable",
+        text_length=len(page.text),
+        html_length=len(page.html),
+        recovery_sources=recovery_sources,
+        evidence=evidence,
+    )
 
 
 def rejection_reasons(
@@ -169,21 +218,80 @@ def pending_reasons(
     search_plan: SearchPlan | None = None,
     min_text_length: int = 300,
 ) -> list[str]:
-    """Return reasons for pages that should be kept but not extracted yet."""
+    """Return technical recovery reasons for pages that should not go to AI yet."""
 
     text_length = len(page.text.strip())
     if text_length >= min_text_length:
         return []
 
     reasons = [f"insufficient_visible_text: {text_length} < {min_text_length}"]
+    recovery_sources = _recovery_sources(page)
+    if recovery_sources:
+        reasons.append("recoverable_metadata_present: " + ", ".join(recovery_sources))
     signals = summarize_page_signals(page, search_plan)
     if signals["jd_signals"] or signals["plan_signals"]:
         reasons.append("candidate_signal_present")
     if len(page.html) > 1000 and text_length <= 30:
-        reasons.append("likely_javascript_rendered_or_hidden_content")
+        reasons.append("html_body_empty")
     else:
         reasons.append("needs_manual_review")
     return reasons
+
+
+def pending_followup_from_pending_page(page: PendingPage) -> PendingFollowup:
+    """Convert Stage 1 recoverable pages into agent-ready follow-up records."""
+
+    reasons = page.reasons
+    reason_text = " ".join(reasons).lower()
+    route = page.metadata.get("technical_route", {}) if isinstance(page.metadata, dict) else {}
+    recovery_sources = route.get("recovery_sources", []) if isinstance(route, dict) else []
+    if "html_body_empty" in reason_text:
+        pending_kind = "javascript_rendered_or_hidden_content"
+        next_action = "retry_with_browser_or_rendered_collection"
+        priority = 80
+    elif "auth" in reason_text or "login" in reason_text:
+        pending_kind = "auth_or_interactive_required"
+        next_action = "manual_review"
+        priority = 45
+    elif "fetch_error" in reason_text and any(marker in reason_text for marker in ["403", "429", "timeout", "timed out"]):
+        pending_kind = "anti_bot_or_rate_limited"
+        next_action = "retry_with_browser_or_rendered_collection"
+        priority = 65
+    elif "insufficient_visible_text" in reason_text and recovery_sources:
+        pending_kind = "insufficient_visible_text"
+        next_action = "manual_review"
+        priority = 65
+    elif "insufficient_visible_text" in reason_text:
+        pending_kind = "insufficient_visible_text"
+        next_action = "manual_review"
+        priority = 55
+    else:
+        pending_kind = "unknown_but_potentially_relevant"
+        next_action = "manual_review"
+        priority = 50
+
+    metadata = page.metadata or {}
+    final_url = metadata.get("final_url")
+    return PendingFollowup(
+        url=page.url,
+        final_url=final_url if isinstance(final_url, str) else None,
+        title=page.title,
+        source_name=page.source_name,
+        company_name=_metadata_string(metadata, "company_name"),
+        company_type=_metadata_string(metadata, "company_type"),
+        is_official=bool(metadata.get("is_official", False)),
+        pending_kind=pending_kind,
+        reasons=reasons,
+        evidence={
+            "text_length": page.text_length,
+            "filter_metadata": metadata,
+            "recovery_sources": recovery_sources,
+        },
+        suggested_next_action=next_action,
+        priority=priority,
+        links=[],
+        stage="collection",
+    )
 
 
 def summarize_page_signals(page: PageContent, search_plan: SearchPlan | None = None) -> dict[str, list[str]]:
@@ -231,6 +339,47 @@ def _redirect_rejection_reason(page: PageContent) -> str | None:
     return None
 
 
+def _recovery_sources(page: PageContent) -> list[RecoverySource]:
+    html = page.html or ""
+    sources: list[RecoverySource] = []
+    if re.search(r"<script[^>]+type=[\"']application/ld\+json[\"']", html, re.I):
+        sources.append("json_ld")
+    if re.search(r"<meta[^>]+property=[\"']og:description[\"'][^>]+content=[\"'][^\"']+", html, re.I):
+        sources.append("og_description")
+    if re.search(r"<meta[^>]+name=[\"']description[\"'][^>]+content=[\"'][^\"']+", html, re.I):
+        sources.append("meta_description")
+    links = page.metadata.get("links", [])
+    if isinstance(links, list) and links:
+        sources.append("important_links")
+    return sources
+
+
+def _reason_code(reason: str):
+    lowered = reason.lower()
+    if "404" in lowered or "not found" in lowered:
+        return "not_found"
+    if "401" in lowered or "403" in lowered or "access denied" in lowered or "forbidden" in lowered:
+        return "access_denied"
+    prefix = reason.split(":", maxsplit=1)[0]
+    if prefix == "likely_javascript_rendered_or_hidden_content":
+        return "html_body_empty"
+    if prefix in {
+        "fetch_error",
+        "bad_status_code",
+        "redirected_to_error_page",
+        "rejection_keywords",
+        "auth_wall",
+        "insufficient_visible_text",
+        "html_body_empty",
+        "recoverable_metadata_present",
+        "needs_manual_review",
+    }:
+        return prefix
+    if prefix == "candidate_signal_present":
+        return "needs_manual_review"
+    return "needs_manual_review"
+
+
 def _is_auth_wall(
     page: PageContent,
     text: str,
@@ -252,3 +401,8 @@ def _is_auth_wall(
 def _canonical_url(url: str) -> str:
     parsed = urlparse(url)
     return parsed._replace(fragment="", query="").geturl().rstrip("/")
+
+
+def _metadata_string(metadata: dict, key: str) -> str | None:
+    value = metadata.get(key)
+    return value if isinstance(value, str) and value.strip() else None

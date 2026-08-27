@@ -1,7 +1,7 @@
 """Deterministic job extraction from page text."""
 
 import re
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin
 
 from job_radar.extractors.base import JobExtractor
 from job_radar.models.job import RawJobRecord
@@ -59,6 +59,12 @@ class RuleBasedJobExtractor(JobExtractor):
             ["现在申请", "立即申请", "返回职位列表", "投递", "公司简介"],
         ) or parsed.get("requirements")
         recruitment_type = self._normalize_recruitment_type(parsed.get("recruitment_type")) or self._infer_recruitment_type(text)
+        location = (
+            parsed.get("location")
+            or self._find_after_labels(text, ["工作地点", "工作地域"])
+            or metadata.get("location")
+            or self._infer_location_from_source(page)
+        )
 
         record_data = {
             "company_name": parsed.get("company_name")
@@ -66,7 +72,7 @@ class RuleBasedJobExtractor(JobExtractor):
             or self._infer_company_name(page.source_name, page.title),
             "company_type": parsed.get("company_type") or metadata.get("company_type"),
             "title": parsed.get("title") or self._infer_title(text, page.title),
-            "location": parsed.get("location") or self._find_after_labels(text, ["工作地点", "工作地域"]),
+            "location": location,
             "description": description,
             "requirements": requirements,
             "recruitment_type": recruitment_type,
@@ -146,7 +152,13 @@ class RuleBasedJobExtractor(JobExtractor):
         return value.strip()
 
     def _infer_recruitment_type(self, text: str) -> str | None:
-        return self._normalize_recruitment_type(text)
+        if "校园招聘" in text or "校招" in text or "Campus Recruitment" in text:
+            return "Campus Recruitment"
+        if "Internship" in text or "实习" in text:
+            return "Internship"
+        if "Graduate Program" in text or "Graduate Programme" in text:
+            return "Graduate Program"
+        return None
 
     def _infer_title(self, text: str, page_title: str) -> str | None:
         metadata_title = self._find_title_before_metadata(text)
@@ -246,3 +258,37 @@ class RuleBasedJobExtractor(JobExtractor):
             if any(keyword in text + href for keyword in ["申请", "投递", "apply", "Apply"]):
                 return urljoin(page.url, href)
         return page.url
+
+    @staticmethod
+    def _infer_location_from_source(page: PageContent) -> str | None:
+        metadata = page.metadata
+        source_text = " ".join(
+            str(value)
+            for value in [
+                metadata.get("source_title"),
+                metadata.get("source_reason"),
+                page.title,
+                unquote(page.url),
+            ]
+            if value
+        )
+        known_locations = [
+            "Shanghai",
+            "Beijing",
+            "Shenzhen",
+            "Guangzhou",
+            "Hangzhou",
+            "Suzhou",
+            "Sydney",
+            "Melbourne",
+            "Singapore",
+            "Hong Kong",
+            "Remote",
+            "China",
+        ]
+        matches = []
+        lowered = source_text.lower()
+        for location in known_locations:
+            if location.lower() in lowered:
+                matches.append(location)
+        return "; ".join(matches) if matches else None

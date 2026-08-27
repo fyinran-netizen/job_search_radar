@@ -10,7 +10,7 @@ from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
-from job_radar.ai.tasks.job_extraction import AIPageInput, extract_important_links
+from job_radar.ai.tasks.job_extraction import AIPageInput, build_ai_page_input
 from job_radar.models.tool import PageContent
 from job_radar.pipeline.page_cleaning import clean_page_text
 
@@ -35,7 +35,6 @@ def main(argv: list[str] | None = None) -> int:
     cleaned_inputs: list[AIPageInput] = []
     report_pages: list[dict] = []
     for page in pages:
-        final_url = page.metadata.get("final_url")
         cleaned = clean_page_text(
             page.html,
             page.text,
@@ -43,20 +42,8 @@ def main(argv: list[str] | None = None) -> int:
             max_text_chars=args.max_text_chars,
             min_extracted_chars=args.min_extracted_chars,
         )
-        important_links = extract_important_links(page)
-        cleaned_inputs.append(
-            AIPageInput(
-                url=page.url,
-                final_url=final_url if isinstance(final_url, str) else None,
-                source_name=page.source_name,
-                source_company_name=_metadata_string(page, "company_name"),
-                company_type=_metadata_string(page, "company_type"),
-                is_official=bool(page.metadata.get("is_official", False)),
-                title=page.title,
-                visible_text=cleaned.text,
-                important_links=important_links,
-            )
-        )
+        ai_input = build_ai_page_input(page, max_text_chars=args.max_text_chars)
+        cleaned_inputs.append(ai_input)
         report_pages.append(
             {
                 "url": page.url,
@@ -68,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
                 "original_line_count": cleaned.original_line_count,
                 "kept_line_count": cleaned.kept_line_count,
                 "removed_line_count": cleaned.removed_line_count,
-                "important_link_count": len(important_links),
+                "important_link_count": len(ai_input.important_links),
                 "truncated": cleaned.truncated,
             }
         )
@@ -97,11 +84,6 @@ def main(argv: list[str] | None = None) -> int:
 def _load_pages(path: str) -> list[PageContent]:
     with open(path, encoding="utf-8-sig") as file:
         return TypeAdapter(list[PageContent]).validate_python(json.load(file))
-
-
-def _metadata_string(page: PageContent, key: str) -> str | None:
-    value = page.metadata.get(key)
-    return value if isinstance(value, str) and value.strip() else None
 
 
 def _write_json(path: str, payload: object) -> None:

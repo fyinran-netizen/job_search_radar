@@ -1,6 +1,6 @@
 # Job Radar
 
-Job Radar is a local job discovery, matching, and application tracking tool. The current version is phase one: it establishes a clear project architecture, a complete demo pipeline, SQLite persistence, and a minimal Streamlit interface.
+Job Radar is a local job discovery, matching, and application tracking tool. The current version is phase one: it establishes a clear project architecture, SQLite persistence, and a minimal Streamlit interface.
 
 This is not a complete web-wide recruitment crawler. The current focus is architecture, data pipeline behavior, and local job management.
 
@@ -15,8 +15,6 @@ Data Source -> Tool/Extractor -> Raw Job Records -> Validation -> Normalization
 -> Deduplication -> Matching -> Persistence -> Service -> Streamlit UI
 ```
 
-The demo pipeline reads `data/demo_jobs.csv`, rejects invalid records, removes obvious duplicates, scores jobs against example YAML configuration, and saves results to SQLite.
-
 The project also includes a local agent-shaped pipeline. The first runnable version is intentionally chain-based rather than a fully dynamic graph: Python owns the order of operations, AI returns bounded structured outputs, and tools execute through `ToolExecutor`.
 
 The current chain is:
@@ -27,8 +25,9 @@ UserProfile
 -> AI or deterministic SearchPlan generation
 -> web_search
 -> collect_page
--> Python hard-failure PageFilter
+-> Python technical PageFilter
 -> AIPageInput trimming
+-> AI semantic page routing
 -> future AI job extraction
 -> Pydantic validation
 -> normalization / deduplication / matching / persistence
@@ -46,7 +45,6 @@ For command-line experiments, the project also has a Codex-backed `web_search` t
 
 ## Completed Features
 
-- Demo CSV tool with realistic sample jobs.
 - Pydantic models for raw and processed job records.
 - Recoverable validation errors for bad records.
 - Basic company, title, and location normalization.
@@ -55,13 +53,14 @@ For command-line experiments, the project also has a Codex-backed `web_search` t
 - SQLite initialization and upsert persistence.
 - Duplicate imports do not create duplicate rows and are reported as updates.
 - User-managed status and notes are preserved on re-import.
-- Streamlit UI for loading demo jobs, editing status/notes, and exporting CSV.
+- Streamlit UI for running real/mock search, editing status/notes, and exporting CSV.
 - Mock agent workflow with mock web search, mock page collection, extractor-based structuring, and real Pipeline persistence.
 - Manual URL workflow with configured JD URLs, Python HTTP page collection, rule-based extraction, and real Pipeline persistence.
 - Deterministic profile completeness gate for required fields such as target roles, skills, and graduation year/date.
 - Optional Codex CLI-backed search strategy generation with deterministic fallback.
 - Codex CLI-backed `web_search` CLI slice for generating `CandidateSource` URLs from a static `SearchPlan`.
-- Python HTTP page collection and hard-failure page filtering before AI extraction.
+- Python HTTP page collection and technical page routing before AI semantic classification.
+- AI semantic page routing that separates job-detail pages from listings, portals, recruitment programs, career homes, and irrelevant pages before extraction.
 - `AIPageInput` trimming so AI job extraction receives only `url`, `final_url`, `title`, and cleaned visible text instead of search-stage metadata.
 - Extractor boundary for `PageContent -> RawJobRecord`, with a rule-based implementation now and an LLM adapter ready for future API integration.
 - pytest coverage for models, pipeline, repository, tools, agent flow, and app import.
@@ -97,7 +96,6 @@ For command-line experiments, the project also has a Codex-backed `web_search` t
 ```text
 app.py                         Streamlit UI
 config/                        Example YAML configuration
-data/demo_jobs.csv             Demo job source
 docs/                          Architecture and pipeline docs
 job_radar/agent/               Workflow orchestration, state, guardrails, limits
 job_radar/ai/                  Skill loading, prompts, AI tasks, Codex CLI provider
@@ -116,7 +114,7 @@ See `docs/project_structure.md` for more detail.
 
 The current runnable pipeline is the deterministic core of the future agent workflow.
 
-1. `DemoCsvTool` reads raw demo jobs from CSV.
+1. Tools or extractors return `RawJobRecord` objects.
 2. `validate_records` checks required fields and records invalid rows.
 3. `normalize_records` standardizes display fields and deduplication keys.
 4. `deduplicate_records` removes obvious duplicate jobs.
@@ -139,11 +137,12 @@ SearchPlan JSON
 -> Codex-backed web_search
 -> CandidateSource[] JSON
 -> HttpPageTool collect_page
--> PageFilter hard-failure screening
+-> PageFilter technical routing
 -> AIPageInput trimming
+-> AI semantic page routing
 ```
 
-The page filter is deliberately conservative. It rejects only obvious hard failures such as fetch errors, bad HTTP status codes, explicit error redirects, 404/not found pages, closed jobs, ended recruitment, or obvious login walls. It does not reject short pages, listing pages, or pages that merely lack obvious JD keywords; those are left for AI extraction and later validation.
+The page filter is deliberately technical. It rejects only obvious hard failures such as fetch errors, bad HTTP status codes, explicit error redirects, 404/not found pages, closed jobs, ended recruitment, or obvious login walls. Short pages, empty rendered bodies, or pages with recoverable metadata become recoverable pending items instead of being interpreted semantically by Python.
 
 Before AI job extraction, `AIPageInput` removes search-stage fields such as `relevance_score`, source-selection `reason`, `company_type`, `is_official`, and link metadata. This reduces token usage and avoids biasing the extractor with earlier AI guesses.
 
@@ -203,9 +202,8 @@ UV_CACHE_DIR=.local_tmp/uv-cache UV_PYTHON_INSTALL_DIR=.local_tmp/uv-python uv s
 
 On first startup, the app initializes the local SQLite database automatically.
 
-The UI has three ingestion buttons:
+The UI has two ingestion actions:
 
-- `Load demo jobs`: reads `data/demo_jobs.csv`.
 - `Run mock agent search`: generates a search plan with local Codex CLI when available, then runs the abstract tool workflow with local mock search/page data.
 - `Fetch manual source URL`: fetches explicitly configured JD URLs and runs the same local pipeline.
 
@@ -239,13 +237,13 @@ Clean readable pages into AI extraction inputs:
 
 `cleaned_pages.json` contains `AIPageInput[]` records with cleaned text plus deterministic provenance: source URLs, source metadata, official-source status, and typed links such as attachments or apply links. Only `page_id`, `title`, and `visible_text` are sent to the AI extraction prompt. The program injects provenance and links into extracted records after the semantic response, so the model cannot rewrite them. The original readable page artifact remains available for audit and retries.
 
-Classify cleaned pages so only clear job-detail pages proceed to extraction:
+Run semantic page routing so only clear job-detail pages proceed to extraction:
 
 ```powershell
 .\scripts\uv-local.ps1 run python -m job_radar.cli.classify_pages --cleaned-pages-file .test_tmp/page_runs/cleaned_pages.json --pending-followups-file .test_tmp/page_runs/pending_followups.json --output-jd-cleaned-pages-file .test_tmp/page_runs/jd_cleaned_pages.json --output-pending-followups-file .test_tmp/page_runs/pending_followups.json --output-report-file .test_tmp/page_runs/page_classification_report.json
 ```
 
-`jd_cleaned_pages.json` contains only `AIPageInput[]` pages the local JD page classifier identified as concrete job-detail pages based on cleaned `visible_text`. Other useful pages are merged into `pending_followups.json` for a later agent step, with fields such as `pending_kind`, `reasons`, `evidence`, `suggested_next_action`, `priority`, `role_titles`, and `links`.
+`jd_cleaned_pages.json` contains only `AIPageInput[]` pages the local semantic page router identified as `job_detail` based on cleaned `visible_text`. Other readable pages are merged into `pending_followups.json` for a later agent step, with fields such as `pending_kind`, `reasons`, `evidence`, `suggested_next_action`, `priority`, `role_titles`, and `links`.
 
 Extract jobs from cleaned pages, then validate, normalize, and deduplicate them without matching or persistence:
 
@@ -257,7 +255,7 @@ By default this uses the local Ollama HTTP API and reads model settings from the
 
 The project loads a private root `.env` file during Python startup. Model settings are task-specific so each AI node is explicit:
 
-- `JOB_RADAR_PAGE_CLASSIFICATION_OLLAMA_MODEL` for pre-extraction JD page classification, normally `qwen3:8b`.
+- `JOB_RADAR_PAGE_CLASSIFICATION_OLLAMA_MODEL` for pre-extraction semantic page routing, normally `qwen3:8b`.
 - `JOB_RADAR_EXTRACTION_OLLAMA_MODEL` for extraction from cleaned pages, normally `gpt-oss:20b-cloud`.
 - `JOB_RADAR_UNDERSTANDING_OLLAMA_MODEL` for job requirement understanding, normally `gpt-oss:20b-cloud`.
 - `JOB_RADAR_MATCH_OLLAMA_MODEL` for semantic match analysis, normally `gpt-oss:20b-cloud`.
@@ -294,18 +292,6 @@ The CLI is only the execution entry point. Model calls go through `OllamaProvide
 ```powershell
 .\scripts\uv-local.ps1 run pytest
 ```
-
-## Demo Data
-
-`data/demo_jobs.csv` intentionally includes:
-
-- One obvious duplicate job.
-- One invalid job missing a required title.
-- Official and non-official sources.
-- Different company types, cities, and job directions.
-- Job apply links and source links using non-real example domains.
-
-The demo data does not contain real personal information.
 
 ## Configuration
 

@@ -56,6 +56,7 @@ def load_candidate_sources(config_dir: Path = CONFIG_DIR) -> tuple[list[Candidat
                 source_name=item.get("name", item["url"]),
                 company_name=item.get("company_name"),
                 company_type=item.get("company_type"),
+                location=item.get("location"),
                 is_official=bool(item.get("official", False)),
                 relevance_score=int(item.get("relevance_score", 100)),
                 reason=f"Manually configured source: {item.get('type', 'unknown')}",

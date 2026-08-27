@@ -104,6 +104,9 @@ class HttpPageTool(BaseTool):
                 **response_metadata,
                 "company_name": source.company_name,
                 "company_type": source.company_type,
+                "location": source.location,
+                "source_title": source.title,
+                "source_reason": source.reason,
                 "is_official": source.is_official,
                 "links": [
                     {"href": urljoin(source.url, link["href"]), "text": link["text"]}

@@ -55,6 +55,7 @@ Rules:
 - Include third-party job pages only when they look like real job descriptions.
 - Avoid generic landing pages, login-only pages, forums, SEO pages, application submission pages, and duplicate URLs.
 - Prefer pages matching target role, graduation cohort, location, and company type.
+- Set location when the posting, page title, URL, snippet, or search result identifies a city, region, country, or remote option. Use a concise display value such as Shanghai, Shenzhen, China, or Remote. Leave it null only if no location signal is visible.
 - Set relevance_score from 0 to 100.
 - Set is_official true only when the source appears to be an official company or recruitment site.
 - Include a concise reason for each URL.

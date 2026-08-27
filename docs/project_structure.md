@@ -22,7 +22,6 @@ job_search_radar/
 |   |-- sources.example.yaml
 |   `-- matching_rules.example.yaml
 |-- data/
-|   |-- demo_jobs.csv
 |   `-- .gitkeep
 |-- docs/
 |   |-- architecture.md
@@ -90,10 +89,11 @@ job_search_radar/
 |   |   |-- factory.py
 |   |   `-- functions/
 |   |       |-- __init__.py
-|   |       |-- demo_csv.py
 |   |       |-- http_page.py
+|   |       |-- job_semantics.py
 |   |       |-- manual_sources.py
 |   |       |-- mock_page.py
+|   |       |-- page_processing.py
 |   |       `-- mock_web_search.py
 |   `-- utils/
 |       |-- __init__.py
@@ -120,7 +120,7 @@ job_search_radar/
 
 `job_radar/agent/` owns workflow control: orchestration, state, transitions, limits, and guardrails. It decides when to call tasks, tools, and extractors, but it does not fetch pages directly or write to storage.
 
-`job_radar/tools/` contains executable actions. `tools/functions/` holds deterministic Python tools such as demo CSV reading, manual source loading, mock search, mock page collection, and HTTP page fetching. `ToolExecutor` executes tools and records tool events.
+`job_radar/tools/` contains executable actions. `tools/functions/` holds deterministic Python tools such as manual source loading, mock search, mock page collection, HTTP page fetching, page routing tools, and job semantic tools. `ToolExecutor` executes tools and records tool events.
 
 `job_radar/extractors/` owns the boundary from `PageContent` to `RawJobRecord`. `RuleBasedJobExtractor` is the current implementation and fallback. `LLMJobExtractor` is the adapter for future AI-backed extraction.
 
@@ -136,7 +136,6 @@ job_search_radar/
 
 The old `collectors/`, plural `agents/`, and `llm/` packages were removed to avoid duplicate responsibilities:
 
-- CSV reading is now `tools/functions/demo_csv.py`.
 - Agent flow control is now `agent/orchestrator.py`.
 - Profile/search decisions are now `ai/tasks/`.
 - Codex or model invocation belongs in `ai/providers/`.

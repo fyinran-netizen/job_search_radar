@@ -6,9 +6,9 @@ This document is written with plain Markdown so it can be previewed without Merm
 
 Job Radar currently has three runnable ingestion paths:
 
-1. Demo CSV pipeline
-2. Mock Agent pipeline
-3. Manual URL pipeline
+1. Mock Agent pipeline
+2. Manual URL pipeline
+3. Real search pipeline
 
 All current ingestion paths eventually feed the same deterministic local processing pipeline:
 
@@ -22,57 +22,7 @@ RawJobRecord
   -> Streamlit UI
 ```
 
-## 1. Current Demo Pipeline
-
-The demo path reads local sample data from `data/demo_jobs.csv`.
-
-```text
-+------------------+
-| data/demo_jobs.csv |
-+---------+--------+
-          |
-          v
-+------------------+
-| DemoCsvTool      |
-+---------+--------+
-          |
-          v
-+------------------+
-| RawJobRecord     |
-+---------+--------+
-          |
-          v
-+------------------+
-| Validation       |
-+---------+--------+
-          |
-          v
-+------------------+
-| Normalization    |
-+---------+--------+
-          |
-          v
-+------------------+
-| Deduplication    |
-+---------+--------+
-          |
-          v
-+------------------+
-| Matching         |
-+---------+--------+
-          |
-          v
-+------------------+
-| SQLite           |
-+---------+--------+
-          |
-          v
-+------------------+
-| Streamlit UI     |
-+------------------+
-```
-
-## 2. Mock Agent Pipeline
+## 1. Mock Agent Pipeline
 
 The mock agent path is the future AI-agent shape. In tests and default service construction it does not call a real LLM and does not access the network. In the Streamlit app, it may use the active user's local Codex CLI login to generate only the `SearchPlan`; mock search and mock page collection still do not make real web requests.
 
@@ -143,9 +93,9 @@ It uses:
 +-----------------------+
 ```
 
-After `JobDiscoveryAgent`, the extracted raw records enter the same processing steps as the demo CSV pipeline.
+After `JobDiscoveryAgent`, the extracted raw records enter the same deterministic local processing pipeline.
 
-## 3. Manual URL Pipeline
+## 2. Manual URL Pipeline
 
 The manual URL path uses the same agent/tool shape, but replaces mock search results with URLs configured in `config/sources.example.yaml` or private `config/sources.yaml`.
 
@@ -193,6 +143,28 @@ This path does make a direct Python HTTP request to the explicitly configured UR
 ```
 
 This lets the project test the real page-fetching and backend structuring boundary before connecting web search or LLM APIs.
+
+## 3. Real Search Pipeline
+
+The real search path is the current end-to-end experiment. It uses Codex CLI for bounded web search, Python HTTP collection, deterministic technical page routing, AI semantic page routing, AI extraction, deterministic job preparation, AI job understanding, and AI/rule-based match analysis.
+
+```text
+UserProfile
+-> SearchPlan
+-> CodexWebSearchTool
+-> CandidateSource[]
+-> HttpPageTool
+-> PageFilterTool
+-> PageCleaningTool
+-> PageClassificationTool
+-> JobExtractionTool
+-> Validation / Normalization / Deduplication
+-> JobUnderstandingTool
+-> MatchAnalysisTool
+-> SQLite
+```
+
+This path is still bounded and controller-driven. AI returns structured decisions; program code validates schemas, applies limits, executes tools, and persists accepted results.
 
 ## 4. Full Target Pipeline
 
@@ -307,9 +279,10 @@ This is why the current project should avoid growing page-specific parsing rules
 | Manual source URLs | `ManualSourceTool` | Configured sources | `CandidateSource` list | Return explicitly configured URLs for manual testing. |
 | Mock page collection | `MockPageTool` | `CandidateSource` | `PageContent` | Simulate fetching page text. No network requests. |
 | HTTP page collection | `HttpPageTool` | `CandidateSource` | `PageContent` | Fetch one explicitly configured URL and extract visible text and links with Python stdlib. |
+| Technical page routing | `filter_pages` / `PageFilterTool` | `PageContent` | readable / recoverable / rejected pages | Program-owned Stage 1 routing for fetch status, auth walls, short text, empty rendered bodies, and recovery signals. |
+| Semantic page routing | `PageSemanticClassifier` / `PageClassificationTool` | `AIPageInput` | job-detail pages and pending follow-ups | AI-owned Stage 2 routing for page types such as job detail, listing, portal, recruitment program, career home, and irrelevant. |
 | Job extraction | `RuleBasedJobExtractor` | `PageContent` | `RawJobRecord` list | Convert marker text or simple JD detail pages into raw job records. No LLM API call is made. |
 | Future LLM extraction | `LLMJobExtractor` plus concrete `LLMClient` | `PageContent` | `RawJobRecord` list | Future replacement for rule-based extraction when page formats become too varied for deterministic parsing. |
-| Demo collection | `DemoCsvTool` | `data/demo_jobs.csv` | `RawJobRecord` list | Read local demo CSV jobs. |
 | Validation | `validate_records` | `RawJobRecord` list | Valid records and errors | Reject records missing required fields. |
 | Normalization | `normalize_records` | Valid raw records | `JobRecord` list | Standardize company, title, location, and deduplication key. |
 | Deduplication | `deduplicate_records` | `JobRecord` list | Unique jobs and duplicates | Remove obvious duplicate jobs. |
@@ -430,20 +403,7 @@ Current behavior:
 - Persistence failures increase `failed_count`.
 - Valid later records continue processing.
 
-## 12. Current UI Buttons
-
-### Load demo jobs
-
-Runs:
-
-```text
-DemoCsvTool
--> Validation
--> Normalization
--> Deduplication
--> Matching
--> SQLite
-```
+## 12. Current UI Actions
 
 ### Run mock agent search
 

@@ -68,7 +68,7 @@ class RawJobRecord(BaseModel):
     @field_validator("graduation_years", mode="before")
     @classmethod
     def parse_graduation_years(cls, value: Any) -> list[str]:
-        """Accept semicolon/comma separated years from CSV demo data."""
+        """Accept semicolon/comma separated years from imported source data."""
 
         if value is None or value == "":
             return []

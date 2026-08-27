@@ -41,6 +41,9 @@ class ToolExecutor:
     def _summarize(value: object) -> str:
         if isinstance(value, list):
             return f"list[{len(value)}]"
+        summary = getattr(value, "tool_event_summary", None)
+        if callable(summary):
+            return str(summary())
         if isinstance(value, BaseModel):
             return value.__class__.__name__
         if isinstance(value, dict):

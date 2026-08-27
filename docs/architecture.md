@@ -30,8 +30,6 @@ flowchart TD
     Pages --> Extract[JobExtractor]
     Extract -. future .-> LLMExtract[LLMJobExtractor + LLMClient]
     Extract --> Agent[agent/orchestrator JobDiscoveryAgent]
-    CSV[Demo CSV Data Source] --> DemoTool[tools/functions DemoCsvTool]
-    DemoTool --> Raw[RawJobRecord]
     Agent --> Raw
     Raw --> Validation[Validation]
     Validation --> Normalization[Normalization]
@@ -112,7 +110,7 @@ This keeps UI, workflow control, tools, deterministic processing, and storage se
 - uv manages dependencies and local commands.
 - Streamlit provides a minimal local interface without a frontend framework.
 - SQLite is enough for local persistence and portfolio demonstration.
-- pandas handles CSV input and export.
+- pandas handles table display and export.
 - Pydantic gives explicit raw and processed job models.
 - PyYAML keeps profile and matching rules outside business code.
 - pytest verifies the pipeline and repository without using the real database.
@@ -165,7 +163,7 @@ Each AI-produced item should be a Pydantic model. AI may propose values, but cod
 
 A real tool should implement the `BaseTool` boundary and return structured models such as `CandidateSource`, `PageContent`, or `RawJobRecord`. It should preserve `apply_url`, `source_url`, `source_name`, and `is_official` so downstream validation and persistence can keep source traceability.
 
-Future tools can be added for company career sites, official campus recruitment pages, or imported CSV files. They should not write directly to SQLite and should not bypass validation.
+Future tools can be added for company career sites, official campus recruitment pages, or imported files. They should not write directly to SQLite and should not bypass validation.
 
 ## Enhancing Matching
 

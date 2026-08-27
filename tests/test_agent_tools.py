@@ -24,6 +24,7 @@ from job_radar.ai.tasks.job_extraction import (
     build_ai_page_input,
     extract_important_links,
 )
+from job_radar.ai.tasks.page_classification import PageSemanticClassifier
 from job_radar.ai.tasks.job_understanding import JobUnderstandingAnalyzer
 from job_radar.ai.tasks.match_analysis import SemanticMatchAnalyzer
 from job_radar.ai.tasks.search_strategy import AISearchPlanBuilder, AutoSearchPlanBuilder, SearchPlanBuilder
@@ -37,7 +38,7 @@ from job_radar.models.tool import PageContent
 from job_radar.models.understanding import JobUnderstandingRecord
 from job_radar.pipeline.page_cleaning import clean_page_text, clean_visible_text
 from job_radar.pipeline.page_filter import filter_pages
-from job_radar.pipeline.page_triage import triage_extracted_page, triage_page_before_extraction
+from job_radar.pipeline.page_triage import triage_extracted_page
 from job_radar.pipeline.basic_gate import evaluate_basic_gate
 from job_radar.pipeline.deterministic_match import evaluate_deterministic_match
 from job_radar.pipeline.normalization import normalize_records
@@ -959,6 +960,27 @@ def test_http_page_tool_reads_local_html(temp_db_path) -> None:
     assert page.metadata["links"][0]["href"].endswith("/apply")
 
 
+def test_rule_based_extractor_uses_candidate_source_location_fallback() -> None:
+    page = PageContent(
+        url="https://careers.example/jobs/software-engineer-shanghai",
+        source_name="Example Careers",
+        title="Software Engineer Graduate",
+        text="Software Engineer Graduate\nBuild internal tools and data services.",
+        metadata={
+            "company_name": "Example Tech",
+            "company_type": "Technology",
+            "location": "Shanghai",
+            "source_title": "Software Engineer Graduate - Shanghai",
+            "source_reason": "Official graduate software engineering posting in Shanghai.",
+            "is_official": True,
+        },
+    )
+
+    record = RuleBasedJobExtractor().extract(page)[0]
+
+    assert record.location == "Shanghai"
+
+
 def test_page_filter_accepts_job_like_page() -> None:
     page = PageContent(
         url="https://careers.example/job/123",
@@ -1075,29 +1097,32 @@ def test_page_filter_rejects_redirected_error_page() -> None:
     assert any("redirected_to_error_page" in reason for reason in result.rejected_pages[0].reasons)
 
 
-def test_page_triage_marks_apply_portal_pending() -> None:
-    page = PageContent(
-        url="https://careers.pddglobalhr.com/campus/",
-        source_name="PDD Campus Careers",
-        title="拼多多集团-PDD校园招聘官网",
-        text=(
-            "拼多多集团-PDD ｜ 校园招聘 立即投递 校招项目 应届生招聘 "
-            "2027届校园招聘 毕业时间：2026年9月-2027年8月 实习生招聘"
-        ),
-        metadata={
-            "final_url": "https://careers.pddglobalhr.com/campus/",
-            "company_name": "拼多多",
-            "company_type": "Technology",
-            "is_official": True,
-        },
+def test_page_semantic_classifier_routes_apply_portal() -> None:
+    page = AIPageInput(
+        url="https://careers.example/campus/",
+        source_name="Example Careers",
+        source_company_name="Example",
+        company_type="Technology",
+        is_official=True,
+        title="Example Campus Careers",
+        visible_text="Explore graduate programs, search jobs, and apply online.",
+    )
+    provider = MockAIProvider(
+        {
+            "page_type": "apply_portal",
+            "suggested_next_action": "open_portal_and_find_job_detail_pages",
+            "reasons": ["The page is centered on search and apply actions."],
+            "evidence": ["search jobs", "apply online"],
+            "confidence": "high",
+        }
     )
 
-    pending = triage_page_before_extraction(page)
+    classification = PageSemanticClassifier(provider).classify(page)
 
-    assert pending is not None
-    assert pending.pending_kind == "official_apply_portal"
-    assert pending.suggested_next_action == "open_portal_and_find_job_detail_pages"
-    assert pending.company_name == "拼多多"
+    assert classification.page_type == "apply_portal"
+    assert not classification.is_job_detail_page
+    assert classification.suggested_next_action == "open_portal_and_find_job_detail_pages"
+    assert "allowed_page_types" in provider.prompts[0]
 
 
 def test_extraction_triage_marks_role_list_without_jd_pending() -> None:
@@ -1359,14 +1384,14 @@ def test_classify_pages_cli_writes_clear_jd_pages_and_pending_followups(capsys, 
         def generate_json(self, prompt, timeout_seconds=90, system_prompt=None):
             if "Software Engineer Graduate" in prompt:
                 return {
-                    "is_job_detail_page": True,
+                    "page_type": "job_detail",
+                    "suggested_next_action": "extract_jobs",
                     "reasons": ["visible text contains responsibilities and requirements"],
                     "evidence": ["Responsibilities include building backend systems."],
                     "confidence": "high",
                 }
             return {
-                "is_job_detail_page": False,
-                "pending_kind": "official_apply_portal",
+                "page_type": "apply_portal",
                 "suggested_next_action": "open_portal_and_find_job_detail_pages",
                 "reasons": ["visible text is an early careers portal"],
                 "evidence": ["Explore graduate programs and search jobs."],
@@ -1532,6 +1557,7 @@ def test_build_ai_page_input_preserves_provenance_but_drops_search_scoring() -> 
         "source_name": "Example Careers",
         "source_company_name": "Example",
         "company_type": "Technology",
+        "source_location": None,
         "is_official": True,
         "title": "Data Analyst Graduate",
         "visible_text": "line one\nline two",
@@ -1785,6 +1811,34 @@ def test_ai_job_extraction_client_prompts_with_minimal_page_input() -> None:
     assert "https://careers.example/job/123" not in input_payload
     assert "important_links" not in input_payload
     assert "Return every explicitly named position" in prompt
+
+
+def test_ai_job_extraction_falls_back_to_source_location_after_semantic_response() -> None:
+    provider = MockAIProvider(
+        {
+            "page_id": "page-1",
+            "page_context": {"company_name": "Example"},
+            "jobs": [{"title": "Software Engineer Graduate", "location": None}],
+        }
+    )
+    page = PageContent(
+        url="https://careers.example/job/1",
+        source_name="Example Careers",
+        title="Software Engineer Graduate - Shanghai",
+        text="Software Engineer Graduate responsibilities and requirements.",
+        metadata={
+            "company_name": "Example",
+            "company_type": "Technology",
+            "location": "Shanghai",
+            "is_official": True,
+        },
+    )
+
+    records = AIJobExtractionClient(provider).extract_jobs_from_page(page)
+
+    assert records[0].location == "Shanghai"
+    input_payload = provider.prompts[0].rsplit("Input:\n", maxsplit=1)[1]
+    assert '"location": "Shanghai"' not in input_payload
 
 
 def test_ai_job_extraction_schema_accepts_empty_jobs_for_later_program_validation() -> None:

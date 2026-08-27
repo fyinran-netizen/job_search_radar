@@ -28,17 +28,17 @@ class JobService:
             rows.append(
                 {
                     "id": job.id,
-                    "公司": job.company_name,
-                    "公司类型": job.company_type,
-                    "岗位": job.title,
-                    "地点": job.location,
-                    "匹配度": job.match_score,
-                    "匹配原因": "；".join(job.match_reasons),
-                    "缺失要求": "；".join(job.missing_requirements),
-                    "状态": job.status,
-                    "备注": job.notes,
-                    "投递链接": job.apply_url or job.source_url,
-                    "来源": job.source_name,
+                    "company": job.company_name,
+                    "company type": job.company_type,
+                    "title": job.title,
+                    "location": job.location,
+                    "match score": job.match_score,
+                    "match reasons": "; ".join(job.match_reasons),
+                    "missing requirements": "; ".join(job.missing_requirements),
+                    "status": job.status,
+                    "notes": job.notes,
+                    "apply link": job.apply_url or job.source_url,
+                    "source": job.source_name,
                 }
             )
         return pd.DataFrame(rows)

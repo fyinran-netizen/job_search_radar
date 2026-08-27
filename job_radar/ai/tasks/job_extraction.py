@@ -31,6 +31,7 @@ class AIPageInput(BaseModel):
     source_name: str | None = None
     source_company_name: str | None = None
     company_type: str | None = None
+    source_location: str | None = None
     is_official: bool = False
     title: str
     visible_text: str = Field(description="Cleaned visible page text, truncated before prompting.")
@@ -83,7 +84,15 @@ class PageJobExtraction(BaseModel):
             }
         )
         return [
-            RawJobRecord.model_validate({**context, **job.model_dump()})
+            RawJobRecord.model_validate(
+                {
+                    **context,
+                    **{
+                        **job.model_dump(),
+                        "location": job.location or page_input.source_location,
+                    },
+                }
+            )
             for job in self.jobs
         ]
 
@@ -98,6 +107,7 @@ def build_ai_page_input(page: PageContent, max_text_chars: int = 12000) -> AIPag
         source_name=page.source_name,
         source_company_name=_optional_metadata_string(page, "company_name"),
         company_type=_optional_metadata_string(page, "company_type"),
+        source_location=_optional_metadata_string(page, "location"),
         is_official=bool(page.metadata.get("is_official", False)),
         title=page.title,
         visible_text=clean_page_text(

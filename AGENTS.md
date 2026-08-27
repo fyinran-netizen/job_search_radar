@@ -18,7 +18,7 @@ The long-term workflow should align with `docs/job_search_agent_full_flow.svg`: 
 ## Current Pipeline
 `Tool/Extractor -> RawJobRecord -> Validation -> Normalization -> Deduplication -> Matching -> Repository -> Service -> Streamlit`
 
-The demo pipeline uses `DemoCsvTool` and `data/demo_jobs.csv`. Invalid single records must be reported without failing the whole run.
+Invalid single records must be reported without failing the whole run.
 
 The default/test mock agent pipeline uses deterministic `ProfileCompletenessChecker`, deterministic `SearchPlanBuilder`, `ToolExecutor`, `MockWebSearchTool`, `MockPageTool`, `RuleBasedJobExtractor`, and `JobDiscoveryAgent`. It must not make network requests or call a real LLM API.
 

@@ -24,6 +24,7 @@ class CandidateSource(BaseModel):
     source_name: str
     company_name: str | None = None
     company_type: str | None = None
+    location: str | None = None
     is_official: bool = False
     relevance_score: int = 0
     reason: str = ""

@@ -10,11 +10,15 @@ from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
-from job_radar.models.page_triage import PendingFollowup
 from job_radar.models.search import CandidateSource, SearchPlan
 from job_radar.models.tool import PageContent
-from job_radar.pipeline.page_filter import PendingPage, RejectedPage, filter_pages, summarize_page_signals
-from job_radar.pipeline.page_triage import pending_followup_from_pending_page, triage_page_before_extraction
+from job_radar.pipeline.page_filter import (
+    PendingPage,
+    RejectedPage,
+    filter_pages,
+    pending_followup_from_pending_page,
+    summarize_page_signals,
+)
 from job_radar.tools.functions.http_page import HttpPageTool
 
 
@@ -100,19 +104,10 @@ def main(argv: list[str] | None = None) -> int:
     result.pending_pages.extend(pending_fetches)
     result.rejected_pages.extend(rejected_fetches)
 
-    triaged_readable_pages = []
     pending_followups = [
         pending_followup_from_pending_page(page)
         for page in result.pending_pages
     ]
-    for page in result.readable_pages:
-        pending = triage_page_before_extraction(page)
-        if pending is None:
-            triaged_readable_pages.append(page)
-        else:
-            pending_followups.append(pending)
-            result.pending_pages.append(_pending_page_from_triage(page, pending))
-    result.readable_pages = triaged_readable_pages
     summary = _summarize_result(result, plan, args.snippet_chars)
     summary["pending_followup_count"] = len(pending_followups)
     summary["pending_followups"] = [item.model_dump() for item in pending_followups]
@@ -196,22 +191,6 @@ def _is_pending_fetch_error(exc: Exception) -> bool:
             "timeout",
             "winerror 10013",
         ]
-    )
-
-
-def _pending_page_from_triage(page: PageContent, pending: PendingFollowup) -> PendingPage:
-    metadata = dict(page.metadata)
-    metadata["pending_kind"] = pending.pending_kind
-    metadata["suggested_next_action"] = pending.suggested_next_action
-    metadata["triage_evidence"] = pending.evidence
-    return PendingPage(
-        url=page.url,
-        source_name=page.source_name,
-        title=page.title,
-        reasons=[*pending.reasons, f"pending_kind: {pending.pending_kind}"],
-        text_length=len(page.text),
-        metadata=metadata,
-        page=page,
     )
 
 

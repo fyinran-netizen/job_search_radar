@@ -26,7 +26,7 @@ class ValidationResult:
     errors: list[ValidationErrorItem] = field(default_factory=list)
 
 
-REQUIRED_FIELDS = ["company_name", "title", "source_name"]
+REQUIRED_FIELDS = ["company_name", "title", "location", "source_name"]
 
 
 ALLOWED_URL_SCHEMES = {"http", "https", "file", "mock"}

@@ -8,19 +8,76 @@ from job_radar.pipeline.normalization import normalize_records
 from job_radar.pipeline.runner import PipelineRunner
 from job_radar.pipeline.validation import validate_records
 from job_radar.storage.repository import JobRepository
-from job_radar.tools.functions.demo_csv import DemoCsvTool
-from job_radar.utils.paths import CONFIG_DIR, DEMO_JOBS_PATH
+from job_radar.utils.paths import CONFIG_DIR
 
 
-def test_demo_csv_tool_reads_demo_data() -> None:
-    records = DemoCsvTool(DEMO_JOBS_PATH).collect()
-
-    assert len(records) == 6
-    assert records[0].company_name == "China Mobile"
+def sample_raw_records() -> list[RawJobRecord]:
+    return [
+        RawJobRecord(
+            company_name="China Mobile",
+            company_type="State-owned Enterprise",
+            title="Data Analyst Graduate",
+            location="Shanghai",
+            description="Analyze business data and build dashboards.",
+            requirements="Python SQL data analysis",
+            source_name="China Mobile Careers",
+            source_url="https://careers.example/china-mobile/data-analyst",
+            is_official=True,
+        ),
+        RawJobRecord(
+            company_name="China Mobile",
+            company_type="State-owned Enterprise",
+            title="Data Analyst Graduate",
+            location="Shanghai",
+            description="Duplicate listing.",
+            requirements="Python SQL",
+            source_name="China Mobile Careers",
+            source_url="https://careers.example/china-mobile/data-analyst-duplicate",
+            is_official=True,
+        ),
+        RawJobRecord(
+            company_name="Future Bank",
+            company_type="Bank",
+            title="Technology Graduate Analyst",
+            location="Sydney",
+            description="Build internal banking systems.",
+            requirements="Python SQL stakeholder communication",
+            source_name="Future Bank Careers",
+            source_url="https://careers.example/future-bank/technology-graduate",
+            is_official=True,
+        ),
+        RawJobRecord(
+            company_name="Example Tech",
+            company_type="Technology",
+            title="Software Engineer Graduate",
+            location="Shenzhen",
+            description="Develop backend services.",
+            requirements="Python distributed systems",
+            source_name="Example Tech Careers",
+            source_url="https://careers.example/example-tech/software-engineer",
+        ),
+        RawJobRecord(
+            company_name="Consulting Co",
+            company_type="Consulting",
+            title="Business Analyst Graduate",
+            location="Melbourne",
+            description="Support client analysis.",
+            requirements="SQL Excel stakeholder communication",
+            source_name="Consulting Co Careers",
+            source_url="https://careers.example/consulting/business-analyst",
+        ),
+        RawJobRecord(
+            company_name="Broken Source",
+            title=None,
+            location="Beijing",
+            source_name="Broken Careers",
+            source_url="https://careers.example/broken",
+        ),
+    ]
 
 
 def test_validation_rejects_invalid_job() -> None:
-    records = DemoCsvTool(DEMO_JOBS_PATH).collect()
+    records = sample_raw_records()
     result = validate_records(records)
 
     assert len(result.valid_records) == 5
@@ -28,7 +85,7 @@ def test_validation_rejects_invalid_job() -> None:
     assert "title" in result.errors[0].reason
 
 
-def test_validation_and_normalization_preserve_missing_location() -> None:
+def test_validation_rejects_missing_location() -> None:
     record = RawJobRecord(
         company_name="Example",
         title="Graduate Analyst",
@@ -38,12 +95,10 @@ def test_validation_and_normalization_preserve_missing_location() -> None:
     )
 
     validation = validate_records([record])
-    normalized = normalize_records(validation.valid_records)
 
-    assert validation.errors == []
-    assert normalized[0].location is None
-    assert normalized[0].normalized_location == ""
-    assert normalized[0].deduplication_key == "example|graduate analyst|"
+    assert validation.valid_records == []
+    assert len(validation.errors) == 1
+    assert "location" in validation.errors[0].reason
 
 
 def test_validation_rejects_invalid_source_url_and_dates() -> None:
@@ -83,7 +138,7 @@ def test_normalization_canonicalizes_semantic_fields() -> None:
 
 
 def test_deduplication_removes_obvious_duplicate() -> None:
-    records = DemoCsvTool(DEMO_JOBS_PATH).collect()
+    records = sample_raw_records()
     valid = validate_records(records).valid_records
     normalized = normalize_records(valid)
     result = deduplicate_records(normalized)
@@ -119,7 +174,7 @@ def test_deduplication_keeps_richer_official_record() -> None:
 
 
 def test_prepare_records_for_analysis_stops_before_matching() -> None:
-    records = DemoCsvTool(DEMO_JOBS_PATH).collect()
+    records = sample_raw_records()
 
     result = prepare_records_for_analysis(records)
 
@@ -177,7 +232,7 @@ def test_group_jobs_by_company_returns_company_first_view() -> None:
 def test_matcher_outputs_score_and_reasons() -> None:
     profile, _, _ = load_profile(CONFIG_DIR)
     rules, _, _ = load_matching_rules(CONFIG_DIR)
-    records = DemoCsvTool(DEMO_JOBS_PATH).collect()
+    records = sample_raw_records()
     normalized = normalize_records(validate_records(records).valid_records)
     unique = deduplicate_records(normalized).unique_records
 
@@ -191,7 +246,7 @@ def test_pipeline_result_counts(temp_db_path) -> None:
     profile, _, _ = load_profile(CONFIG_DIR)
     rules, _, _ = load_matching_rules(CONFIG_DIR)
     repository = JobRepository(temp_db_path)
-    runner = PipelineRunner(DemoCsvTool(DEMO_JOBS_PATH).collect, repository, profile, rules)
+    runner = PipelineRunner(sample_raw_records, repository, profile, rules)
 
     result = runner.run()
 

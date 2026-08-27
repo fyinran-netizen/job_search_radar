@@ -1,4 +1,4 @@
-"""Classify cleaned pages as job-detail pages before extraction."""
+"""Run Stage 2 semantic page routing before extraction."""
 
 from __future__ import annotations
 
@@ -13,14 +13,18 @@ from pydantic import TypeAdapter, ValidationError
 
 from job_radar.ai.providers.ollama import OllamaProvider
 from job_radar.ai.tasks.job_extraction import AIPageInput
-from job_radar.ai.tasks.page_classification import PageJDClassification, PageJDClassifier
+from job_radar.ai.tasks.page_classification import (
+    PageSemanticClassification,
+    PageSemanticClassifier,
+    pending_followup_from_semantic_classification,
+)
 from job_radar.models.page_triage import PendingFollowup
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Classify cleaned AI page inputs and separate clear JDs from pending pages."""
+    """Classify cleaned AI page inputs and separate extractable JDs from pending pages."""
 
-    parser = argparse.ArgumentParser(description="Classify cleaned pages before extraction.")
+    parser = argparse.ArgumentParser(description="Run semantic page routing before extraction.")
     parser.add_argument("--cleaned-pages-file", required=True, help="Path to cleaned AIPageInput[] JSON.")
     parser.add_argument("--pending-followups-file", help="Existing PendingFollowup[] JSON to merge.")
     parser.add_argument("--output-jd-cleaned-pages-file", required=True, help="Path to write JD AIPageInput[] JSON.")
@@ -30,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--ollama-model",
         default=os.environ.get("JOB_RADAR_PAGE_CLASSIFICATION_OLLAMA_MODEL", "qwen3:8b"),
-        help="Ollama model used for page JD classification.",
+        help="Ollama model used for semantic page routing.",
     )
     parser.add_argument(
         "--ollama-base-url",
@@ -56,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 3
 
-    classifier = PageJDClassifier(provider, timeout_seconds=args.timeout_seconds)
+    classifier = PageSemanticClassifier(provider, timeout_seconds=args.timeout_seconds)
     jd_pages: list[AIPageInput] = []
     classification_items: list[dict] = []
     errors: list[dict] = []
@@ -137,29 +141,9 @@ def _write_json(path: str, payload: object) -> None:
 
 def _pending_followup_from_classification(
     page: AIPageInput,
-    classification: PageJDClassification,
+    classification: PageSemanticClassification,
 ) -> PendingFollowup:
-    pending_kind = classification.pending_kind or "not_job_detail_page"
-    suggested_next_action = classification.suggested_next_action or "manual_review"
-    return PendingFollowup(
-        url=page.url,
-        final_url=page.final_url,
-        title=page.title,
-        source_name=page.source_name or _source_name_from_url(page.url),
-        company_name=page.source_company_name,
-        company_type=page.company_type,
-        is_official=page.is_official,
-        pending_kind=pending_kind,
-        reasons=classification.reasons or ["page classifier did not identify a concrete job detail page"],
-        evidence={
-            "classifier": classification.model_dump(),
-            "text_length": len(page.visible_text),
-        },
-        suggested_next_action=suggested_next_action,
-        priority=80 if pending_kind in {"official_apply_portal", "job_listing_page", "role_list_without_jd"} else 60,
-        links=[{"url": link.url, "text": link.text, "kind": link.kind} for link in page.important_links],
-        stage="pre_extraction",
-    )
+    return pending_followup_from_semantic_classification(page, classification)
 
 
 def _pending_followup_for_error(page: AIPageInput, exc: Exception) -> PendingFollowup:
@@ -193,6 +177,8 @@ def _classification_error(index: int, page: AIPageInput, exc: Exception) -> dict
 
 def _source_name_from_url(url: str) -> str:
     return url.split("/", 3)[2] if "://" in url and len(url.split("/", 3)) > 2 else url
+
+
 
 
 if __name__ == "__main__":

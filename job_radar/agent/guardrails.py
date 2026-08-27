@@ -9,5 +9,5 @@ def select_candidate_sources(sources: list[CandidateSource], min_relevance_score
     return [
         source
         for source in sources
-        if source.is_official and source.relevance_score >= min_relevance_score
+        if source.relevance_score >= min_relevance_score
     ]

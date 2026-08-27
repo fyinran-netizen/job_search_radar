@@ -8,7 +8,12 @@ from job_radar.ai.tasks.job_extraction import (
     extract_important_links,
 )
 from job_radar.ai.tasks.job_understanding import JobUnderstandingAnalyzer
-from job_radar.ai.tasks.page_classification import PageJDClassification, PageJDClassifier
+from job_radar.ai.tasks.page_classification import (
+    PageJDClassification,
+    PageJDClassifier,
+    PageSemanticClassification,
+    PageSemanticClassifier,
+)
 from job_radar.ai.tasks.search_strategy import (
     AISearchPlanBuilder,
     AutoSearchPlanBuilder,
@@ -25,6 +30,8 @@ __all__ = [
     "JobUnderstandingAnalyzer",
     "PageJDClassification",
     "PageJDClassifier",
+    "PageSemanticClassification",
+    "PageSemanticClassifier",
     "SearchPlanBuilder",
     "build_ai_page_input",
     "create_search_plan_builder",
