@@ -1,0 +1,6 @@
+{
+  "scenario": "duplicate_richer_official_record",
+  "stage": "deduplication",
+  "expected_unique_count": 1,
+  "expected_duplicate_count": 1
+}

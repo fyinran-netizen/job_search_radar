@@ -4,7 +4,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from job_radar.models.profile import ProfileCompletenessResult, UserProfile
+from job_radar.profile.models import ProfileCompletenessResult, UserProfile
 
 
 @dataclass(frozen=True)
@@ -65,3 +65,5 @@ class ProfileCompletenessChecker:
             missing_fields=missing,
             questions=questions,
         )
+
+

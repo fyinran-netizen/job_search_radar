@@ -8,11 +8,10 @@ import sys
 
 from pydantic import ValidationError
 
-from job_radar.ai.providers.codex_cli import CodexCliProvider
-from job_radar.models.search import CandidateSource, SearchPlan
+from job_radar.tools.web_search.models import CandidateSource, SearchPlan
 from job_radar.tools.executor import ToolExecutor
-from job_radar.tools.functions.codex_web_search import CodexWebSearchTool
-from job_radar.tools.functions.mock_web_search import MockWebSearchTool
+from job_radar.tools.web_search.providers.mock import MockWebSearchTool
+from job_radar.tools.web_search.providers.tavily import TavilyWebSearchTool
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,8 +20,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run Job Radar web_search from a static SearchPlan.")
     parser.add_argument(
         "--provider",
-        choices=["codex", "mock"],
-        default="codex",
+        choices=["tavily", "mock"],
+        default="tavily",
         help="web_search implementation to run.",
     )
     parser.add_argument(
@@ -39,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="Print prompt and raw Codex CLI stdout/stderr when available.",
+        help="Retained for CLI compatibility; Tavily does not expose provider debug output.",
     )
     args = parser.parse_args(argv)
 
@@ -49,13 +48,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Invalid search plan input: {exc}", file=sys.stderr)
         return 2
 
-    codex_provider: CodexCliProvider | None = None
-    if args.provider == "codex":
-        codex_provider = CodexCliProvider()
-        if not codex_provider.is_available():
-            print("Codex CLI is not installed or not authenticated. Run `codex login` first.", file=sys.stderr)
-            return 3
-        tool = CodexWebSearchTool(provider=codex_provider, max_sources=args.max_sources)
+    if args.provider == "tavily":
+        tool = TavilyWebSearchTool(max_sources=args.max_sources)
     else:
         tool = MockWebSearchTool()
 
@@ -68,13 +62,9 @@ def main(argv: list[str] | None = None) -> int:
         ]
     except Exception as exc:
         print(f"web_search failed: {exc}", file=sys.stderr)
-        if args.debug:
-            _print_debug(codex_provider)
         return 3
 
     print(json.dumps([source.model_dump() for source in sources], ensure_ascii=False, indent=2))
-    if args.debug:
-        _print_debug(codex_provider)
     return 0
 
 
@@ -83,22 +73,7 @@ def _load_plan(path: str) -> SearchPlan:
         return SearchPlan.model_validate(json.load(file))
 
 
-def _print_debug(codex_provider: CodexCliProvider | None) -> None:
-    debug_info = getattr(codex_provider, "last_debug_info", None) if codex_provider else None
-    if debug_info is None:
-        print("\n--- DEBUG ---", file=sys.stderr)
-        print("No Codex CLI call debug info is available.", file=sys.stderr)
-        return
-    print("\n--- DEBUG: Codex command ---", file=sys.stderr)
-    print(" ".join(debug_info.command), file=sys.stderr)
-    print("\n--- DEBUG: Prompt sent to Codex ---", file=sys.stderr)
-    print(debug_info.prompt, file=sys.stderr)
-    print("\n--- DEBUG: Codex stdout ---", file=sys.stderr)
-    print(debug_info.stdout or "<empty>", file=sys.stderr)
-    print("\n--- DEBUG: Codex stderr ---", file=sys.stderr)
-    print(debug_info.stderr or "<empty>", file=sys.stderr)
-    print(f"\n--- DEBUG: Codex return code ---\n{debug_info.returncode}", file=sys.stderr)
-
-
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

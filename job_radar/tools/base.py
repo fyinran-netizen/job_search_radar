@@ -14,3 +14,5 @@ class BaseTool(ABC):
     @abstractmethod
     def run(self, payload: BaseModel | dict[str, Any]) -> BaseModel | dict[str, Any] | list[Any]:
         """Run the tool with structured input."""
+
+

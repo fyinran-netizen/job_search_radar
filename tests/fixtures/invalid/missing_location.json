@@ -1,0 +1,5 @@
+{
+  "scenario": "missing_location",
+  "stage": "validation",
+  "expected_valid": false
+}

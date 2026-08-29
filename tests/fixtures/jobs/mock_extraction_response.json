@@ -1,0 +1,16 @@
+{
+  "page_id": "page-1",
+  "page_context": {
+    "company_name": "Example Employer",
+    "recruitment_type": "Graduate Program",
+    "graduation_years": ["2026"]
+  },
+  "jobs": [
+    {
+      "title": "Data Analyst Graduate",
+      "location": "Sydney",
+      "description": "Graduate role supporting reporting and data quality.",
+      "requirements": "Python; SQL; data analysis; 2026 graduates"
+    }
+  ]
+}

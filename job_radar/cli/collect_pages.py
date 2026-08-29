@@ -10,16 +10,16 @@ from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
-from job_radar.models.search import CandidateSource, SearchPlan
-from job_radar.models.tool import PageContent
-from job_radar.pipeline.page_filter import (
-    PendingPage,
+from job_radar.tools.web_search.models import CandidateSource, SearchPlan
+from job_radar.tools.page_collection.models import PageContent
+from job_radar.tools.page_processing.technical_triage import (
     RejectedPage,
-    filter_pages,
-    pending_followup_from_pending_page,
+    triage_pages,
     summarize_page_signals,
 )
-from job_radar.tools.functions.http_page import HttpPageTool
+from job_radar.tools.page_processing.models import PendingFollowup
+from job_radar.tools.page_collection.http import HttpPageTool
+from job_radar.tools.page_processing.cleaning import parse_collected_page
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -65,19 +65,21 @@ def main(argv: list[str] | None = None) -> int:
 
     tool = HttpPageTool(timeout_seconds=args.timeout_seconds)
     pages: list[PageContent] = []
-    pending_fetches: list[PendingPage] = []
+    pending_fetches: list[PendingFollowup] = []
     rejected_fetches: list[RejectedPage] = []
     for source in sources:
         try:
-            pages.append(tool.run(source))
+            pages.append(parse_collected_page(tool.run(source)))
         except Exception as exc:
             if _is_pending_fetch_error(exc):
                 pending_fetches.append(
-                    PendingPage(
+                    PendingFollowup(
                         url=source.url,
                         source_name=source.source_name,
                         title=source.title,
                         reasons=[f"fetch_error: {exc}"],
+                        pending_kind="unknown_but_potentially_relevant",
+                        suggested_next_action="manual_review",
                         metadata={
                             "company_name": source.company_name,
                             "company_type": source.company_type,
@@ -100,15 +102,13 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 )
 
-    result = filter_pages(pages, search_plan=plan, min_text_length=args.min_text_length)
-    result.pending_pages.extend(pending_fetches)
-    result.rejected_pages.extend(rejected_fetches)
+    triage = triage_pages(pages, search_plan=plan, min_text_length=args.min_text_length)
+    readable_pages = triage.readable_pages
+    pending_pages = triage.recoverable_pages
+    rejected_pages = [*triage.rejected_pages, *rejected_fetches]
 
-    pending_followups = [
-        pending_followup_from_pending_page(page)
-        for page in result.pending_pages
-    ]
-    summary = _summarize_result(result, plan, args.snippet_chars)
+    pending_followups = pending_fetches
+    summary = _summarize_result(readable_pages, pending_pages, rejected_pages, plan, args.snippet_chars)
     summary["pending_followup_count"] = len(pending_followups)
     summary["pending_followups"] = [item.model_dump() for item in pending_followups]
     summary["collected_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -127,12 +127,12 @@ def main(argv: list[str] | None = None) -> int:
         if output_readable_pages_file:
             _write_json(
                 output_readable_pages_file,
-                [page.model_dump() for page in result.readable_pages],
+                [page.model_dump() for page in readable_pages],
             )
         if output_pending_file:
             _write_json(
                 output_pending_file,
-                [page.model_dump() for page in result.pending_pages],
+                [page.model_dump() for page in pending_pages],
             )
         if output_pending_followups_file:
             _write_json(
@@ -194,11 +194,11 @@ def _is_pending_fetch_error(exc: Exception) -> bool:
     )
 
 
-def _summarize_result(result, plan: SearchPlan | None, snippet_chars: int) -> dict:
+def _summarize_result(readable_pages, pending_pages, rejected_pages, plan: SearchPlan | None, snippet_chars: int) -> dict:
     return {
-        "readable_count": len(result.readable_pages),
-        "pending_count": len(result.pending_pages),
-        "rejected_count": len(result.rejected_pages),
+        "readable_count": len(readable_pages),
+        "pending_count": len(pending_pages),
+        "rejected_count": len(rejected_pages),
         "readable_pages": [
             {
                 "url": page.url,
@@ -210,7 +210,7 @@ def _summarize_result(result, plan: SearchPlan | None, snippet_chars: int) -> di
                 "signals": summarize_page_signals(page, plan),
                 "snippet": page.text[:snippet_chars],
             }
-            for page in result.readable_pages
+            for page in readable_pages
         ],
         "pending_pages": [
             {
@@ -219,16 +219,12 @@ def _summarize_result(result, plan: SearchPlan | None, snippet_chars: int) -> di
                 "status_code": page.metadata.get("status_code"),
                 "source_name": page.source_name,
                 "title": page.title,
-                "text_length": page.text_length,
-                "reasons": page.reasons,
-                "signals": (
-                    summarize_page_signals(page.page, plan)
-                    if page.page
-                    else {"jd_signals": [], "plan_signals": []}
-                ),
-                "snippet": page.page.text[:snippet_chars] if page.page else "",
+                "text_length": len(page.text),
+                "reasons": [],
+                "signals": summarize_page_signals(page, plan),
+                "snippet": page.text[:snippet_chars],
             }
-            for page in result.pending_pages
+            for page in pending_pages
         ],
         "rejected_pages": [
             {
@@ -240,10 +236,12 @@ def _summarize_result(result, plan: SearchPlan | None, snippet_chars: int) -> di
                 "text_length": page.text_length,
                 "reasons": page.reasons,
             }
-            for page in result.rejected_pages
+            for page in rejected_pages
         ],
     }
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

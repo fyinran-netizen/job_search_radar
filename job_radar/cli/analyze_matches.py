@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,16 +11,18 @@ from time import perf_counter
 
 from pydantic import TypeAdapter, ValidationError
 
-from job_radar.ai.providers.ollama import OllamaProvider
-from job_radar.ai.tasks.match_analysis import SemanticMatchAnalyzer
+from job_radar.config import load_runtime_settings
+from job_radar.infra.llm.ollama import OllamaProvider
+from job_radar.tools.match_analysis.analyzer import SemanticMatchAnalyzer
 from job_radar.config import load_profile
-from job_radar.models.understanding import JobUnderstandingRecord
-from job_radar.utils.paths import CONFIG_DIR
+from job_radar.tools.job_understanding.models import JobUnderstandingRecord
+from job_radar.infra.paths import CONFIG_DIR
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run semantic match analysis for JobUnderstandingRecord[] artifacts."""
 
+    settings = load_runtime_settings()
     parser = argparse.ArgumentParser(
         description="Analyze understood jobs with deterministic hard rules and one Ollama semantic matching call per eligible job."
     )
@@ -32,12 +33,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout-seconds", type=int, default=180)
     parser.add_argument(
         "--ollama-model",
-        default=os.environ.get("JOB_RADAR_MATCH_OLLAMA_MODEL", "gpt-oss:20b-cloud"),
+        default=settings.match.model,
         help="Ollama model name.",
     )
     parser.add_argument(
         "--ollama-base-url",
-        default=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
+        default=settings.ollama_base_url,
         help="Local Ollama server base URL.",
     )
     args = parser.parse_args(argv)
@@ -131,3 +132,5 @@ def _write_json(path: str, payload: object) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

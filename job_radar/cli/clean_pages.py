@@ -10,9 +10,10 @@ from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
-from job_radar.ai.tasks.job_extraction import AIPageInput, build_ai_page_input
-from job_radar.models.tool import PageContent
-from job_radar.pipeline.page_cleaning import clean_page_text
+from job_radar.tools.job_extraction.extraction import build_ai_page_input
+from job_radar.tools.job_extraction.models import AIPageInput
+from job_radar.tools.page_collection.models import PageContent
+from job_radar.tools.page_processing.cleaning import clean_page_text
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -94,3 +95,5 @@ def _write_json(path: str, payload: object) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

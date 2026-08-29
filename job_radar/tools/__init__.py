@@ -1,31 +1,30 @@
-"""Tool abstractions and local function tools."""
+"""Tool abstractions and local tool entry points."""
 
 from job_radar.tools.base import BaseTool
 from job_radar.tools.executor import ToolExecutor
-from job_radar.tools.factory import (
+from job_radar.tools.job_extraction.tool import JobExtractionTool
+from job_radar.tools.job_understanding.tool import JobUnderstandingTool
+from job_radar.tools.match_analysis.tool import MatchAnalysisTool
+from job_radar.tools.page_collection.http import HttpPageTool
+from job_radar.tools.page_collection.browser import BrowserPageTool
+from job_radar.tools.page_collection.mock import MockPageTool
+from job_radar.tools.page_processing.tool import (
+    PageProcessingInput,
+    PageProcessingOutput,
+    PageProcessingTool,
+)
+from job_radar.tools.registry import (
     create_manual_http_tool_executor,
     create_mock_tool_executor,
     create_real_search_tool_executor,
 )
-from job_radar.tools.functions.codex_web_search import CodexWebSearchTool
-from job_radar.tools.functions.http_page import HttpPageTool
-from job_radar.tools.functions.job_semantics import (
-    JobExtractionTool,
-    JobUnderstandingTool,
-    MatchAnalysisTool,
-)
-from job_radar.tools.functions.manual_sources import ManualSourceTool
-from job_radar.tools.functions.mock_page import MockPageTool
-from job_radar.tools.functions.mock_web_search import MockWebSearchTool
-from job_radar.tools.functions.page_processing import (
-    PageClassificationTool,
-    PageCleaningTool,
-    PageFilterTool,
-)
+from job_radar.tools.web_search.providers.mock import MockWebSearchTool
+from job_radar.tools.web_search.providers.tavily import TavilyWebSearchTool
+from job_radar.tools.web_search.source_selection import ManualSourceTool
 
 __all__ = [
     "BaseTool",
-    "CodexWebSearchTool",
+    "BrowserPageTool",
     "HttpPageTool",
     "JobExtractionTool",
     "JobUnderstandingTool",
@@ -33,9 +32,10 @@ __all__ = [
     "MatchAnalysisTool",
     "MockPageTool",
     "MockWebSearchTool",
-    "PageClassificationTool",
-    "PageCleaningTool",
-    "PageFilterTool",
+    "TavilyWebSearchTool",
+    "PageProcessingInput",
+    "PageProcessingOutput",
+    "PageProcessingTool",
     "ToolExecutor",
     "create_manual_http_tool_executor",
     "create_mock_tool_executor",

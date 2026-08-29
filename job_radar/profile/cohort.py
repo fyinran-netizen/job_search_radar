@@ -1,4 +1,4 @@
-"""Graduation cohort helpers used by search and deterministic matching."""
+﻿"""Graduation cohort helpers used by search and deterministic matching."""
 
 import re
 
@@ -40,6 +40,7 @@ def infer_graduation_cohort(graduation_date: str) -> GraduationCohort | None:
 
 def _build_cohort(cohort_year: int) -> GraduationCohort:
     previous_year = cohort_year - 1
+
     return GraduationCohort(
         cohort_year=cohort_year,
         graduation_start=f"{previous_year}-09",
@@ -53,3 +54,5 @@ def _build_cohort(cohort_year: int) -> GraduationCohort:
             f"{cohort_year} Graduate Program",
         ],
     )
+
+

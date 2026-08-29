@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from job_radar.utils.paths import PROJECT_ROOT
+from job_radar.infra.paths import PROJECT_ROOT
 
 
 @pytest.fixture
@@ -13,3 +13,5 @@ def temp_db_path() -> Iterator[Path]:
     base.mkdir(exist_ok=True)
     with TemporaryDirectory(dir=base) as directory:
         yield Path(directory) / "jobs.db"
+
+

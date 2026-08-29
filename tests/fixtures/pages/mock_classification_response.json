@@ -1,0 +1,7 @@
+{
+  "page_type": "job_detail",
+  "suggested_next_action": "extract_jobs",
+  "reasons": ["The mock page contains concrete role details."],
+  "evidence": ["responsibilities", "requirements", "apply"],
+  "confidence": "high"
+}

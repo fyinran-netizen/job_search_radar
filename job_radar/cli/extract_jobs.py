@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
@@ -13,30 +13,43 @@ from urllib.parse import unquote, urlparse
 
 from pydantic import TypeAdapter, ValidationError
 
-from job_radar.ai.providers.base import AIProvider
-from job_radar.ai.providers.codex_cli import CodexCliProvider
-from job_radar.ai.providers.ollama import OllamaProvider
-from job_radar.ai.tasks.job_extraction import AIJobExtractionClient, AIPageInput
-from job_radar.extractors.rule_based import RuleBasedJobExtractor
-from job_radar.models.job import RawJobRecord
-from job_radar.models.page_triage import PendingFollowup
-from job_radar.models.tool import PageContent
-from job_radar.pipeline.job_preparation import prepare_records_for_analysis
-from job_radar.pipeline.page_triage import triage_extracted_page
+from job_radar.config import load_runtime_settings
+from job_radar.infra.llm.base import AIProvider
+from job_radar.infra.llm.codex import CodexCliProvider
+from job_radar.infra.llm.ollama import OllamaProvider
+from job_radar.tools.job_extraction.extraction import AIJobExtractionClient
+from job_radar.tools.job_extraction.models import AIPageInput
+from job_radar.tools.job_extraction.models import RawJobRecord
+from job_radar.tools.page_processing.models import PendingFollowup
+from job_radar.tools.page_collection.models import PageContent
+from job_radar.tools.job_extraction.normalization import deduplicate_records, normalize_records
+from job_radar.tools.job_extraction.validation import validate_records
+from job_radar.tools.job_extraction.quality import triage_extracted_page
+
+
+@dataclass
+class _PreparationResult:
+    prepared_records: list
+    duplicate_records: list
+    valid_count: int
+    invalid_count: int
+    duplicate_count: int
+    errors: list
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run job extraction from cleaned AIPageInput records."""
 
+    settings = load_runtime_settings()
     parser = argparse.ArgumentParser(
         description="Extract jobs from cleaned pages, then validate, normalize, and deduplicate them."
     )
     parser.add_argument("--cleaned-pages-file", required=True, help="Path to cleaned AIPageInput[] JSON.")
     parser.add_argument(
         "--provider",
-        choices=["ollama", "codex", "rule-based"],
-        default=os.environ.get("JOB_RADAR_EXTRACTION_PROVIDER", "ollama"),
-        help="Extraction provider. ollama uses the local Ollama API; codex uses Codex CLI; rule-based is testing fallback.",
+        choices=["ollama", "codex"],
+        default=settings.extraction.provider,
+        help="Extraction provider. ollama uses the local Ollama API; codex uses Codex CLI.",
     )
     parser.add_argument("--timeout-seconds", type=int, default=240)
     parser.add_argument("--max-attempts", type=int, default=3, help="Maximum AI attempts per page batch.")
@@ -44,12 +57,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=8, help="Number of pages per AI extraction call.")
     parser.add_argument(
         "--ollama-model",
-        default=os.environ.get("JOB_RADAR_EXTRACTION_OLLAMA_MODEL", "gpt-oss:20b-cloud"),
+        default=settings.extraction.model,
         help="Ollama model name for --provider ollama.",
     )
     parser.add_argument(
         "--ollama-base-url",
-        default=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
+        default=settings.ollama_base_url,
         help="Local Ollama server base URL for --provider ollama.",
     )
     parser.add_argument("--output-run-dir", help="Artifact directory for prepared_jobs.json.")
@@ -88,7 +101,17 @@ def main(argv: list[str] | None = None) -> int:
     extraction_seconds = perf_counter() - extraction_started
 
     preparation_started = perf_counter()
-    preparation = prepare_records_for_analysis(raw_records)
+    validation = validate_records(raw_records)
+    normalized = normalize_records(validation.valid_records)
+    deduplication = deduplicate_records(normalized)
+    preparation = _PreparationResult(
+        prepared_records=deduplication.unique_records,
+        duplicate_records=deduplication.duplicate_records,
+        valid_count=len(validation.valid_records),
+        invalid_count=len(validation.errors),
+        duplicate_count=len(deduplication.duplicate_records),
+        errors=[item.__dict__ for item in validation.errors],
+    )
     preparation_seconds = perf_counter() - preparation_started
     errors = [*extraction_errors, *preparation.errors]
 
@@ -273,32 +296,7 @@ def _extract_records(
             )
         return records, errors, retry_count, pending_followups
 
-    extractor = RuleBasedJobExtractor()
-    for index, page_input in enumerate(page_inputs, start=1):
-        _print_progress("extracting", index, len(page_inputs), page_input)
-        page_started = perf_counter()
-        try:
-            page_records = extractor.extract(_page_input_to_page_content(page_input))
-        except Exception as exc:
-            elapsed = perf_counter() - page_started
-            errors.append(_extraction_error(index, page_input, exc))
-            _print_progress("failed", index, len(page_inputs), page_input, f"{exc} in {elapsed:.2f}s")
-            continue
-        elapsed = perf_counter() - page_started
-        backfilled_records = _backfill_records(page_records, page_input)
-        pending = triage_extracted_page(page_input, backfilled_records)
-        if pending:
-            pending_followups.append(pending)
-        else:
-            records.extend(backfilled_records)
-        _print_progress(
-            "extracted",
-            index,
-            len(page_inputs),
-            page_input,
-            f"{0 if pending else len(backfilled_records)} prepared candidate record(s) in {elapsed:.2f}s",
-        )
-    return records, errors, retry_count, pending_followups
+    raise ValueError(f"Unsupported extraction provider: {provider_name}")
 
 
 def _error_summary(exc: Exception, max_chars: int = 240) -> str:
@@ -472,3 +470,5 @@ def _write_json(path: str, payload: object) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

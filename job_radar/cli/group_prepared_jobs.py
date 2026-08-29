@@ -9,8 +9,8 @@ from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
-from job_radar.models.job import JobRecord
-from job_radar.pipeline.job_grouping import group_jobs_by_company
+from job_radar.tools.job_extraction.models import JobRecord
+from job_radar.frontend.view_models import group_jobs_by_company
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -56,3 +56,5 @@ def _write_json(path: str, payload: object) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

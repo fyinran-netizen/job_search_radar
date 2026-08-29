@@ -1,11 +1,16 @@
 """Tool executor used by agent workflows."""
 
+from time import perf_counter
 from typing import Any
 
 from pydantic import BaseModel
 
-from job_radar.models.tool import ToolEvent
+from job_radar.infra.logging import get_logger
+from job_radar.tools.page_collection.models import ToolEvent
 from job_radar.tools.base import BaseTool
+
+
+logger = get_logger(__name__)
 
 
 class ToolExecutor:
@@ -27,13 +32,32 @@ class ToolExecutor:
 
         if tool_name not in self.tools:
             raise ValueError(f"Tool is not registered: {tool_name}")
-        result = self.tools[tool_name].run(payload)
+        started = perf_counter()
+        input_summary = self._summarize(payload)
+        logger.info("tool_start tool=%s input=%s", tool_name, input_summary)
+        try:
+            result = self.tools[tool_name].run(payload)
+        except Exception:
+            logger.exception(
+                "tool_failed tool=%s elapsed_ms=%.1f input=%s",
+                tool_name,
+                (perf_counter() - started) * 1000,
+                input_summary,
+            )
+            raise
+        elapsed_ms = (perf_counter() - started) * 1000
         self.events.append(
             ToolEvent(
                 tool_name=tool_name,
                 input_summary=self._summarize(payload),
                 output_summary=self._summarize(result),
             )
+        )
+        logger.info(
+            "tool_complete tool=%s elapsed_ms=%.1f output=%s",
+            tool_name,
+            elapsed_ms,
+            self._summarize(result),
         )
         return result
 
@@ -49,3 +73,5 @@ class ToolExecutor:
         if isinstance(value, dict):
             return f"dict[{', '.join(sorted(value.keys()))}]"
         return value.__class__.__name__
+
+

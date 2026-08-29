@@ -1,0 +1,957 @@
+﻿import json
+
+import pytest
+from pydantic import TypeAdapter, ValidationError
+
+from job_radar.infra.llm.codex import CodexCliProvider
+from tests.doubles.mock_ai_provider import MockAIProvider
+from job_radar.infra.llm.ollama import OllamaProvider
+from job_radar.infra.llm.structured_output import StructuredOutputError, parse_json_output, validate_model
+from job_radar.tools.job_extraction.extraction import (
+    AIJobExtractionClient,
+    AIPageInput,
+    build_ai_page_input,
+    extract_important_links,
+)
+from job_radar.tools.job_extraction.models import ImportantLink
+from job_radar.tools.page_processing.semantic_classification import PageSemanticClassifier
+from job_radar.tools.job_understanding.analyzer import JobUnderstandingAnalyzer
+from job_radar.tools.match_analysis.analyzer import SemanticMatchAnalyzer
+from job_radar.tools.web_search.search_strategy import AISearchPlanBuilder, AutoSearchPlanBuilder, SearchPlanBuilder
+from job_radar.config import load_matching_rules, load_profile
+from job_radar.tools.job_extraction.models import RawJobRecord
+from job_radar.tools.web_search.models import CandidateSource, SearchPlan
+from job_radar.tools.web_search.config import load_candidate_sources
+from job_radar.profile.models import UserProfile
+from job_radar.tools.page_collection.models import PageContent
+from job_radar.tools.page_processing.cleaning import clean_page_text
+from job_radar.tools.page_processing.technical_triage import triage_pages
+from job_radar.tools.job_extraction.quality import triage_extracted_page
+from job_radar.tools.match_analysis.basic_gate import evaluate_basic_gate
+from job_radar.tools.match_analysis.deterministic import evaluate_deterministic_match
+from job_radar.tools.job_extraction.normalization import normalize_records
+from job_radar.profile.completeness import ProfileCompletenessChecker
+from job_radar.infra.paths import CONFIG_DIR
+
+
+def make_prepared_job(**overrides):
+    data = {
+        "company_name": "Example Bank",
+        "company_type": "Bank",
+        "title": "Information Technology Graduate",
+        "location": "Sydney",
+        "description": "Build internal digital banking systems and data services.",
+        "requirements": "Python SQL backend development 2026 graduates",
+        "graduation_years": ["2026"],
+        "source_name": "Example Bank Careers",
+        "source_url": "https://careers.example/job/1",
+        "is_official": True,
+    }
+    data.update(overrides)
+    return normalize_records([RawJobRecord(**data)])[0]
+
+
+def test_profile_checker_reports_incomplete_profile() -> None:
+    result = ProfileCompletenessChecker().check(UserProfile())
+
+    assert not result.is_complete
+    assert "target_roles" in result.missing_fields
+    assert result.questions
+
+
+def test_profile_checker_allows_optional_preferences() -> None:
+    profile = UserProfile(
+        graduation_date="2026",
+        target_roles=["Data Analyst"],
+        skills=["Python"],
+    )
+
+    result = ProfileCompletenessChecker().check(profile)
+
+    assert result.is_complete
+    assert result.missing_fields == []
+
+
+def test_profile_checker_requires_graduation_year() -> None:
+    profile = UserProfile(
+        graduation_date="next winter",
+        target_roles=["Data Analyst"],
+        skills=["Python"],
+        preferred_locations=["Shanghai"],
+    )
+
+    result = ProfileCompletenessChecker().check(profile)
+
+    assert not result.is_complete
+    assert result.missing_fields == ["graduation_date"]
+
+
+def test_search_plan_builder_generates_keywords() -> None:
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Data Analyst"],
+        skills=["Python"],
+        preferred_locations=["Shanghai"],
+        preferred_company_types=["Bank"],
+    )
+
+    plan = SearchPlanBuilder().build(profile)
+
+    assert plan.cohort_year == 2026
+    assert plan.graduation_start == "2025-09"
+    assert plan.graduation_end == "2026-06"
+    assert "2026届" in plan.cohort_terms
+    assert "Data Analyst 2026 graduate" in plan.keywords
+    assert "2026 graduate jobs Shanghai" in plan.keywords
+    assert "Bank 2026 graduate program" in plan.keywords
+
+
+def test_search_plan_builder_maps_september_to_next_cohort() -> None:
+    profile = UserProfile(
+        graduation_date="2026-09",
+        target_roles=["Software Engineer"],
+        skills=["Python"],
+        preferred_locations=["Shanghai"],
+        preferred_company_types=["Bank"],
+    )
+
+    plan = SearchPlanBuilder().build(profile)
+
+    assert plan.cohort_year == 2027
+    assert plan.graduation_start == "2026-09"
+    assert plan.graduation_end == "2027-06"
+    assert "2027届" in plan.cohort_terms
+    assert "Software Engineer 2027 graduate" in plan.keywords
+
+
+def test_ai_search_plan_builder_uses_skill_provider() -> None:
+    profile, _, _ = load_profile(CONFIG_DIR)
+    provider = MockAIProvider(
+        {
+            "target_roles": ["Data Analyst"],
+            "locations": ["Sydney"],
+            "company_types": ["Technology"],
+            "keywords": ["Data Analyst graduate 2026 Sydney"],
+        }
+    )
+
+    plan = AISearchPlanBuilder(provider).build(profile)
+
+    assert plan.keywords == ["Data Analyst graduate 2026 Sydney"]
+    assert provider.prompts
+    assert "Search Strategy" in provider.prompts[0]
+
+
+def test_auto_search_plan_builder_falls_back_when_codex_unavailable() -> None:
+    class UnavailableCodexProvider:
+        def is_available(self) -> bool:
+            return False
+
+        def generate_json(self, _prompt):
+            raise AssertionError("Codex should not be called when unavailable")
+
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Data Analyst"],
+        skills=["Python"],
+        preferred_locations=["Shanghai"],
+        preferred_company_types=["Bank"],
+    )
+    builder = AutoSearchPlanBuilder(codex_provider=UnavailableCodexProvider())  # type: ignore[arg-type]
+
+    plan = builder.build(profile)
+
+    assert builder.last_source == "deterministic"
+    assert "not installed or not authenticated" in (builder.last_error or "")
+    assert "Data Analyst 2026 graduate" in plan.keywords
+
+
+def test_auto_search_plan_builder_falls_back_when_codex_output_fails() -> None:
+    class FailingCodexProvider:
+        def is_available(self) -> bool:
+            return True
+
+        def generate_json(self, _prompt):
+            raise RuntimeError("bad codex output")
+
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Data Analyst"],
+        skills=["Python"],
+        preferred_locations=["Shanghai"],
+        preferred_company_types=["Bank"],
+    )
+    builder = AutoSearchPlanBuilder(codex_provider=FailingCodexProvider())  # type: ignore[arg-type]
+
+    plan = builder.build(profile)
+
+    assert builder.last_source == "deterministic"
+    assert builder.last_error == "bad codex output"
+    assert "Data Analyst 2026 graduate" in plan.keywords
+
+
+def test_codex_provider_uses_utf8_for_prompt(monkeypatch) -> None:
+    captured = {}
+
+    def fake_which(_command):
+        return "codex.CMD"
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["input"] = kwargs.get("input")
+        captured["encoding"] = kwargs.get("encoding")
+        captured["errors"] = kwargs.get("errors")
+
+        class Result:
+            returncode = 0
+            stdout = '{"target_roles":[],"locations":[],"company_types":[],"keywords":[]}'
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr("job_radar.infra.llm.codex.shutil.which", fake_which)
+    monkeypatch.setattr("job_radar.infra.llm.codex.subprocess.run", fake_run)
+
+    provider = CodexCliProvider()
+    prompt = "\ufeff娴嬭瘯鎻愮ず"
+    provider.generate_json(prompt)
+
+    assert captured["command"] == ["codex.CMD", "exec"]
+    assert captured["input"] == prompt
+    assert captured["encoding"] == "utf-8"
+    assert captured["errors"] == "replace"
+
+
+
+def test_ollama_provider_parses_message_content_json(monkeypatch) -> None:
+    captured = {}
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b'{"message":{"content":"[{\\"company_name\\":\\"Example\\"}]"}}'
+
+    def fake_urlopen(request, timeout=180):
+        captured["url"] = request.full_url
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("job_radar.infra.llm.ollama.urlopen", fake_urlopen)
+
+    data = OllamaProvider(model="qwen3.5:cloud").generate_json("extract", timeout_seconds=12)
+
+    assert data == [{"company_name": "Example"}]
+    assert captured["url"] == "http://localhost:11434/api/chat"
+    assert captured["body"]["model"] == "qwen3.5:cloud"
+    assert captured["body"]["format"] == "json"
+    assert captured["body"]["stream"] is False
+    assert captured["body"]["think"] is False
+    assert captured["timeout"] == 12
+
+    OllamaProvider(model="gpt-oss:20b-cloud").generate_json("extract")
+
+    assert captured["body"]["think"] == "low"
+
+
+def test_ollama_provider_sends_system_and_user_messages(monkeypatch) -> None:
+    captured = {}
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b'{"message":{"content":"{\\"ok\\":true}"}}'
+
+    def fake_urlopen(request, timeout=180):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    monkeypatch.setattr("job_radar.infra.llm.ollama.urlopen", fake_urlopen)
+
+    data = OllamaProvider().generate_json("user prompt", system_prompt="system prompt")
+
+    assert data == {"ok": True}
+    assert captured["body"]["messages"] == [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "user prompt"},
+    ]
+
+
+def test_deterministic_match_bypasses_ai_for_graduation_year_mismatch() -> None:
+    job = make_prepared_job(graduation_years=["2027"], graduation_requirement="2027 graduates only")
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Software Engineer"],
+        skills=["Python"],
+    )
+
+    result = evaluate_deterministic_match(job, profile)
+    analyzer = SemanticMatchAnalyzer(MockAIProvider({"should_not": "be called"}))
+    assessment = analyzer.analyze(job, profile)
+
+    assert not result.should_call_ai
+    assert result.hard_reject
+    assert assessment.analysis_source == "deterministic"
+    assert assessment.recommendation == "skip"
+    assert assessment.match_score == 0
+    assert "graduation_year_mismatch" in assessment.risk_flags
+
+
+def test_deterministic_match_treats_september_as_next_cohort() -> None:
+    job = make_prepared_job(graduation_years=["2027"])
+    profile = UserProfile(
+        graduation_date="2026-09",
+        target_roles=["Software Engineer"],
+        skills=["Python"],
+    )
+
+    result = evaluate_deterministic_match(job, profile)
+
+    assert result.should_call_ai
+    assert not result.hard_reject
+    assert "graduation_year_mismatch" not in result.risk_flags
+
+
+def test_basic_gate_uses_clear_pre_understanding_names() -> None:
+    job = make_prepared_job(graduation_years=["2027"], graduation_requirement="2027 graduates only")
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Policy Analyst"],
+        skills=["policy writing"],
+    )
+
+    result = evaluate_basic_gate(job, profile)
+
+    assert result.decision == "skip"
+    assert not result.should_continue
+    assert result.gate_reasons == ["Graduation year eligibility does not match."]
+    assert "graduation_year_mismatch" in result.risk_flags
+
+
+def test_basic_gate_keeps_ambiguous_graduation_year_mismatch_for_understanding() -> None:
+    job = make_prepared_job(
+        title="Software Dev Engineer Intern 2026 Shanghai",
+        requirements="Build services with Java and distributed systems.",
+        graduation_years=["2026"],
+        graduation_requirement=None,
+    )
+    profile = UserProfile(
+        graduation_date="2027-06",
+        target_roles=["Software Engineer"],
+        skills=["Python"],
+    )
+
+    result = evaluate_basic_gate(job, profile)
+
+    assert result.should_continue
+    assert not result.hard_reject
+    assert any(flag.startswith("ambiguous_graduation_year_mismatch") for flag in result.risk_flags)
+
+
+def test_basic_gate_rejects_explicit_graduation_window_mismatch() -> None:
+    job = make_prepared_job(
+        graduation_years=[],
+        graduation_start="2025-09",
+        graduation_end="2026-08",
+        graduation_requirement="Candidates must graduate between 2025-09 and 2026-08.",
+    )
+    profile = UserProfile(
+        graduation_date="2027-06",
+        target_roles=["Software Engineer"],
+        skills=["Python"],
+    )
+
+    result = evaluate_basic_gate(job, profile)
+
+    assert result.decision == "skip"
+    assert result.hard_reject
+    assert "graduation_window_mismatch" in result.risk_flags
+
+
+def test_job_understanding_analyzer_returns_discipline_neutral_facts() -> None:
+    job = make_prepared_job(
+        title="Policy Graduate",
+        description="Prepare policy briefs and consult stakeholders on public programs.",
+        requirements="Strong written communication, research judgment, and 2026 graduates.",
+    )
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Policy Analyst"],
+        skills=["writing", "research"],
+    )
+    provider = MockAIProvider(
+        {
+            "canonical_role": "Policy Graduate",
+            "role_family": "policy",
+            "seniority": "graduate",
+            "responsibilities": ["Prepare policy briefs.", "Consult stakeholders."],
+            "hard_requirements": [
+                {
+                    "category": "communication",
+                    "importance": "hard",
+                    "text": "Strong written communication.",
+                    "evidence": "Strong written communication",
+                }
+            ],
+            "preferred_requirements": [],
+            "eligibility_constraints": [
+                {
+                    "category": "graduation_or_cohort",
+                    "importance": "hard",
+                    "text": "Open to 2026 graduates.",
+                    "evidence": "2026 graduates",
+                }
+            ],
+            "work_context": ["Public programs."],
+            "risk_flags": [],
+            "evidence": ["Prepare policy briefs", "Strong written communication"],
+            "confidence": "high",
+        }
+    )
+
+    record = JobUnderstandingAnalyzer(provider).understand(job, profile)
+
+    assert record.source == "ai"
+    assert record.basic_gate.decision == "continue"
+    assert record.understanding is not None
+    assert record.understanding.hard_requirements[0].category == "communication"
+    assert "technical_skill" not in provider.prompts[1]
+
+
+def test_semantic_match_analyzer_merges_deterministic_risks() -> None:
+    job = make_prepared_job(is_official=False)
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Software Engineer"],
+        skills=["Python", "SQL"],
+    )
+    provider = MockAIProvider(
+        {
+            "match_score": 96,
+            "role_fit": "high",
+            "must_have_fit": "yes",
+            "match_reasons": ["Role involves backend systems relevant to the candidate."],
+            "missing_requirements": ["Cloud stack is not specified."],
+            "risk_flags": ["vague_tech_stack"],
+            "job_summary": "Information technology graduate role building internal banking systems.",
+            "recommendation": "apply",
+            "confidence": "high",
+        }
+    )
+
+    assessment = SemanticMatchAnalyzer(provider).analyze(job, profile)
+
+    assert assessment.analysis_source == "ai_with_deterministic_overrides"
+    assert assessment.match_score == 90
+    assert assessment.recommendation == "apply"
+    assert assessment.confidence == "medium"
+    assert assessment.risk_flags == ["non_official_source", "vague_tech_stack"]
+    assert provider.prompts
+    assert "You are Job Radar's semantic match analysis component." in provider.prompts[0]
+    assert '"candidate_profile"' in provider.prompts[1]
+    assert "fixed scoring rubric" in provider.prompts[0].lower()
+
+
+def test_parse_json_output_repairs_only_trailing_container_closures() -> None:
+    dell_output = (
+        '{"page_id":"page-1","page_context":{},"jobs":['
+        '{"title":"Data analyst","requirements":"Excel"}}'
+    )
+    parsed = parse_json_output(dell_output)
+    assert parsed["jobs"][0]["title"] == "Data analyst"
+
+    with pytest.raises(StructuredOutputError):
+        parse_json_output('{"jobs":[{"title": invalid}]}')
+    with pytest.raises(StructuredOutputError):
+        parse_json_output('{"jobs":[{"title":"unterminated}]}')
+
+
+def test_load_candidate_sources_reads_enabled_manual_source() -> None:
+    sources, used_example, _path = load_candidate_sources(CONFIG_DIR)
+    assert used_example
+    assert sources
+    assert sources[0].url == "https://kedacom.zhiye.com/zpdetail/511158941"
+    assert sources[0].company_name == "苏州科达科技股份有限公司"
+
+
+def test_page_filter_accepts_job_like_page() -> None:
+    page = PageContent(
+        url="https://careers.example/job/123",
+        source_name="Example Careers",
+        title="Data Analyst Graduate 2026",
+        text=(
+            "Graduate Program responsibilities requirements qualifications location apply "
+            "Python SQL data analysis role for early careers candidates. "
+            "This page contains enough job description content for extraction."
+        ),
+        metadata={"status_code": 200, "final_url": "https://careers.example/job/123"},
+    )
+    result = triage_pages([page], min_text_length=80)
+    assert result.readable_pages == [page]
+    assert result.rejected_pages == []
+
+
+
+
+def test_page_filter_rejects_obvious_non_job_page() -> None:
+    page = PageContent(
+        url="https://careers.example/login",
+        source_name="Example Careers",
+        title="Login",
+        text="Please login or sign in to continue.",
+        metadata={"status_code": 200, "final_url": "https://careers.example/login"},
+    )
+
+    result = triage_pages([page], min_text_length=80)
+
+    assert result.readable_pages == []
+    assert result.rejected_pages[0].url == "https://careers.example/login"
+    assert any("auth_wall" in reason for reason in result.rejected_pages[0].reasons)
+
+
+def test_page_filter_does_not_reject_job_page_for_nav_login_words() -> None:
+    page = PageContent(
+        url="https://www.boc.cn/aboutboc/bi4/202603/t20260311_25654053.html",
+        source_name="Bank of China",
+        title="Bank of China 2026 Spring Recruitment Notice",
+        text=(
+            "閻ц缍?濞夈劌鍞?娑擃厼娴楅柧鎯邦攽閼测€插敜閺堝妾洪崗顒€寰?026楠炲瓨妲€涳絾瀚戦懕妯哄彆閸?"
+            "閹锋稖浠掗崗顒€鎲?閺嶁€虫疮閹锋稖浠?瀹搞儰缍旈崷鎵仯 娴犳槒浜寸憰浣圭湴 瀹€妞剧秴閼卞矁鐭?閺佺増宓侀崚鍡樼€?缁夋垶濡у畝?"
+            "This page contains detailed campus recruitment information for 2026 graduates."
+        ),
+        metadata={"status_code": 200, "final_url": "https://www.boc.cn/aboutboc/bi4/202603/t20260311_25654053.html"},
+    )
+
+    result = triage_pages([page], min_text_length=80)
+
+    assert result.readable_pages == [page]
+    assert result.rejected_pages == []
+
+
+def test_page_filter_keeps_redirected_detail_to_listing_page() -> None:
+    page = PageContent(
+        url="https://group.bnpparibas/en/careers/job-offer/bnp-paribas-sydney-2026-graduate-programme",
+        source_name="BNP Paribas Careers",
+        title="Job offers for the job function Finance accounts and management control - BNP Paribas",
+        text=(
+            "Graduate programme qualifications location apply 2026 Sydney Bank Technology "
+            "This is a long listing page with navigation and many generic career links."
+        ),
+        metadata={
+            "status_code": 200,
+            "final_url": "https://group.bnpparibas/en/careers/all-job-offers/finance-accounts-and-management-control",
+        },
+    )
+    plan = SearchPlan(
+        target_roles=["Graduate Program"],
+        locations=["Sydney"],
+        company_types=["Bank"],
+        keywords=["BNP Paribas Sydney 2026 Graduate Programme"],
+    )
+
+    result = triage_pages([page], search_plan=plan, min_text_length=80)
+
+    assert result.readable_pages == [page]
+    assert result.rejected_pages == []
+
+
+def test_page_filter_marks_short_collectable_page_pending() -> None:
+    page = PageContent(
+        url="https://job.xiaohongshu.com/campus/position/17071",
+        source_name="Xiaohongshu Campus Careers",
+        title="Xiaohongshu",
+        text="Short page",
+        metadata={"status_code": 200, "final_url": "https://job.xiaohongshu.com/campus/position/17071"},
+    )
+
+    result = triage_pages([page], min_text_length=300)
+
+    assert result.readable_pages == []
+    assert result.recoverable_pages[0].url == page.url
+    assert result.rejected_pages == []
+
+
+def test_page_filter_rejects_redirected_error_page() -> None:
+    page = PageContent(
+        url="https://job-boards.greenhouse.io/letsgetchecked/jobs/4833407101",
+        source_name="LetsGetChecked Greenhouse",
+        title="Jobs at LetsGetChecked",
+        text="Jobs at LetsGetChecked. Search openings.",
+        metadata={
+            "status_code": 200,
+            "final_url": "https://job-boards.greenhouse.io/letsgetchecked?error=true",
+        },
+    )
+
+    result = triage_pages([page], min_text_length=30)
+
+    assert result.readable_pages == []
+    assert any("redirected_to_error_page" in reason for reason in result.rejected_pages[0].reasons)
+
+
+def test_page_semantic_classifier_routes_apply_portal() -> None:
+    page = AIPageInput(
+        url="https://careers.example/campus/",
+        source_name="Example Careers",
+        source_company_name="Example",
+        company_type="Technology",
+        is_official=True,
+        title="Example Campus Careers",
+        visible_text="Explore graduate programs, search jobs, and apply online.",
+    )
+    provider = MockAIProvider(
+        {
+            "page_type": "apply_portal",
+            "suggested_next_action": "open_portal_and_find_job_detail_pages",
+            "reasons": ["The page is centered on search and apply actions."],
+            "evidence": ["search jobs", "apply online"],
+            "confidence": "high",
+        }
+    )
+
+    classification = PageSemanticClassifier(provider).classify(page)
+
+    assert classification.page_type == "apply_portal"
+    assert not classification.is_job_detail_page
+    assert classification.suggested_next_action == "open_portal_and_find_job_detail_pages"
+    assert "allowed_page_types" in provider.prompts[0]
+
+
+def test_extraction_triage_marks_role_list_without_jd_pending() -> None:
+    page_input = AIPageInput(
+        url="https://career.example/list",
+        source_name="Example Careers",
+        source_company_name="Example Robotics",
+        company_type="Technology",
+        is_official=False,
+        title="2027 campus recruitment role list",
+        visible_text="Role list",
+    )
+    records = [
+        RawJobRecord(
+            company_name="Example Robotics",
+            title=f"缁犳纭跺銉р柤鐢?{index}",
+            graduation_years=["2027"],
+            apply_url="https://career.example/apply",
+            source_url="https://career.example/list",
+            source_name="Example Careers",
+        )
+        for index in range(12)
+    ]
+
+    pending = triage_extracted_page(page_input, records)
+
+    assert pending is not None
+    assert pending.pending_kind == "role_list_without_jd"
+    assert pending.suggested_next_action == "find_detail_pages_for_role_titles"
+    assert pending.evidence["extracted_job_count"] == 12
+    assert len(pending.role_titles) == 12
+
+
+def test_extraction_triage_marks_small_sparse_role_list_pending() -> None:
+    page_input = AIPageInput(
+        url="https://career.example/notice",
+        source_name="Example Careers",
+        source_company_name="Example Robotics",
+        company_type="Technology",
+        is_official=False,
+        title="2027 campus recruitment notice",
+        visible_text="Software roles apply through the campus portal.",
+    )
+    records = [
+        RawJobRecord(
+            company_name="Example Robotics",
+            title="Motion Control Algorithm Engineer",
+            graduation_years=["2027"],
+            apply_url="https://career.example/campus",
+            source_url="https://career.example/notice",
+            source_name="Example Careers",
+        ),
+        RawJobRecord(
+            company_name="Example Robotics",
+            title="Agent Developer",
+            graduation_years=["2027"],
+            apply_url="https://career.example/campus",
+            source_url="https://career.example/notice",
+            source_name="Example Careers",
+        ),
+    ]
+
+    pending = triage_extracted_page(page_input, records)
+
+    assert pending is not None
+    assert pending.pending_kind == "role_list_without_jd"
+    assert pending.evidence["sparse_record_ratio"] == 1.0
+    assert pending.role_titles == ["Motion Control Algorithm Engineer", "Agent Developer"]
+
+
+def test_build_ai_page_input_preserves_provenance_but_drops_search_scoring() -> None:
+    page = PageContent(
+        url="https://careers.example/job/123",
+        source_name="Example Careers",
+        title="Data Analyst Graduate",
+        text=" line one \n\n line two \n line three ",
+        metadata={
+            "final_url": "https://careers.example/job/123",
+            "company_name": "Example",
+            "company_type": "Technology",
+            "is_official": True,
+            "relevance_score": 95,
+            "reason": "Search result explanation.",
+            "links": [
+                {"href": "https://careers.example/apply", "text": "Apply"},
+                {"href": "https://careers.example/about", "text": "About us"},
+            ],
+        },
+    )
+
+    ai_input = build_ai_page_input(page, max_text_chars=17)
+    payload = ai_input.model_dump()
+
+    assert payload == {
+        "url": "https://careers.example/job/123",
+        "final_url": "https://careers.example/job/123",
+        "source_name": "Example Careers",
+        "source_company_name": "Example",
+        "company_type": "Technology",
+        "source_location": None,
+        "is_official": True,
+        "title": "Data Analyst Graduate",
+        "visible_text": "line one\nline two",
+        "important_links": [
+            {
+                "url": "https://careers.example/apply",
+                "text": "Apply",
+                "kind": "apply",
+                "reason": "apply_signal",
+            }
+        ],
+    }
+
+
+def test_extract_important_links_keeps_attachments_and_apply_links() -> None:
+    page = PageContent(
+        url="https://www.boc.cn/aboutboc/bi4/202603/t20260311_25654053.html",
+        source_name="Bank of China",
+        title="Bank of China 2026 Spring Recruitment Notice",
+        text="Recruitment notice",
+        metadata={
+            "links": [
+                {
+                    "href": "https://pic.bankofchina.com/bocappd/appform/202603/P020260311360231598031.pdf",
+                    "text": "Attachment",
+                },
+                {"href": "https://careers.example/apply", "text": "Apply now"},
+                {"href": "https://careers.example/about", "text": "About"},
+            ]
+        },
+    )
+
+    links = extract_important_links(page)
+
+    assert [link.kind for link in links] == ["apply", "attachment"]
+    assert links[1].url.endswith(".pdf")
+
+
+def test_extract_important_links_uses_visible_apply_url_and_rejects_misleading_path() -> None:
+    page = PageContent(
+        url="https://www.boc.cn/recruitment",
+        source_name="Bank of China",
+        title="Spring recruitment",
+        text=(
+            "閺勩儱顒滈幏娑滀粧缂冩垹鐝稉鐚寸窗\n"
+            "https://campus.chinahr.com/pages/boc-2026-Spring\n"
+            "Apply online"
+        ),
+        metadata={
+            "links": [
+                {
+                    "href": "https://university.example/applyguide/index.html",
+                    "text": "濞茶濮╂０鍕啞",
+                }
+            ]
+        },
+    )
+
+    links = extract_important_links(page)
+
+    assert [(link.kind, link.url) for link in links] == [
+        ("apply", "https://campus.chinahr.com/pages/boc-2026-Spring")
+    ]
+
+
+def test_important_link_rejects_unknown_kind() -> None:
+    with pytest.raises(ValidationError):
+        ImportantLink(url="https://careers.example/file.pdf", kind="download")
+
+
+def test_clean_page_text_prefers_trafilatura_html() -> None:
+    cleaned = clean_page_text(
+        """
+        <html>
+          <body>
+            <nav>Home Login Contact</nav>
+            <main>
+              <h1>Data Analyst Graduate 2026</h1>
+              <p>Responsibilities include SQL dashboards and product metrics.</p>
+              <p>Requirements include Python, SQL, and statistics.</p>
+            </main>
+          </body>
+        </html>
+        """,
+        fallback_text="Home\nLogin\nBad fallback text",
+        url="https://careers.example/job/123",
+        min_extracted_chars=40,
+    )
+
+    assert cleaned.method == "trafilatura"
+    assert "Responsibilities include SQL dashboards" in cleaned.text
+    assert "Bad fallback text" not in cleaned.text
+
+
+def test_ai_job_extraction_client_prompts_with_minimal_page_input() -> None:
+    page = PageContent(
+        url="https://careers.example/job/123",
+        source_name="Example Careers",
+        title="Data Analyst Graduate",
+        text="Data Analyst Graduate responsibilities requirements location apply.",
+        metadata={
+            "final_url": "https://careers.example/job/123",
+            "company_name": "Example",
+            "company_type": "Technology",
+            "is_official": True,
+            "relevance_score": 95,
+            "reason": "Search result explanation.",
+        },
+    )
+    provider = MockAIProvider(
+        {
+            "page_id": "page-1",
+            "page_context": {
+                "company_name": "Example",
+                "recruitment_type": "Graduate Program",
+                "graduation_years": [2026],
+                "source_url": "https://hallucinated.example/job",
+                "apply_url": "https://hallucinated.example/file.pdf",
+                "is_official": False,
+            },
+            "jobs": [
+                {
+                    "title": "Data Analyst Graduate",
+                    "location": "Sydney",
+                },
+                {
+                    "title": "Software Engineer Graduate",
+                    "location": "Melbourne",
+                }
+            ],
+        }
+    )
+
+    records = AIJobExtractionClient(provider, max_text_chars=200).extract_jobs_from_page(page)
+
+    assert records[0].title == "Data Analyst Graduate"
+    assert records[1].title == "Software Engineer Graduate"
+    assert all(record.company_name == "Example" for record in records)
+    assert all(record.company_type == "Technology" for record in records)
+    assert all(record.source_url == "https://careers.example/job/123" for record in records)
+    assert all(record.source_name == "Example Careers" for record in records)
+    assert all(record.is_official is True for record in records)
+    assert all(record.apply_url is None for record in records)
+    assert all(record.graduation_years == ["2026"] for record in records)
+    assert provider.prompts
+    prompt = provider.prompts[0]
+    input_payload = prompt.rsplit("Input:\n", maxsplit=1)[1]
+    assert "visible_text" in input_payload
+    assert "relevance_score" not in input_payload
+    assert "Search result explanation" not in input_payload
+    assert '"company_type": "Technology"' not in input_payload
+    assert '"is_official": true' not in input_payload
+    assert "https://careers.example/job/123" not in input_payload
+    assert "important_links" not in input_payload
+    assert "Return every explicitly named position" in prompt
+
+
+def test_ai_job_extraction_falls_back_to_source_location_after_semantic_response() -> None:
+    provider = MockAIProvider(
+        {
+            "page_id": "page-1",
+            "page_context": {"company_name": "Example"},
+            "jobs": [{"title": "Software Engineer Graduate", "location": None}],
+        }
+    )
+    page = PageContent(
+        url="https://careers.example/job/1",
+        source_name="Example Careers",
+        title="Software Engineer Graduate - Shanghai",
+        text="Software Engineer Graduate responsibilities and requirements.",
+        metadata={
+            "company_name": "Example",
+            "company_type": "Technology",
+            "location": "Shanghai",
+            "is_official": True,
+        },
+    )
+
+    records = AIJobExtractionClient(provider).extract_jobs_from_page(page)
+
+    assert records[0].location == "Shanghai"
+    input_payload = provider.prompts[0].rsplit("Input:\n", maxsplit=1)[1]
+    assert '"location": "Shanghai"' not in input_payload
+
+
+def test_ai_job_extraction_schema_accepts_empty_jobs_for_later_program_validation() -> None:
+    provider = MockAIProvider(
+        {
+            "page_id": "page-1",
+            "page_context": {"company_name": "Example"},
+            "jobs": [],
+        }
+    )
+    page_input = AIPageInput(
+        url="https://careers.example/jobs",
+        title="Example careers",
+        visible_text="No named positions were extracted.",
+    )
+
+    records = AIJobExtractionClient(provider).extract_jobs_from_input(page_input)
+
+    assert records == []
+
+
+def test_ai_job_extraction_accepts_single_object_for_single_input_batch() -> None:
+    provider = MockAIProvider(
+        {
+            "page_id": "page-1",
+            "page_context": {"company_name": "Example"},
+            "jobs": [{"title": "Data Analyst Graduate", "location": "Sydney"}],
+        }
+    )
+    page_input = AIPageInput(
+        url="https://careers.example/job/1",
+        source_name="Example Careers",
+        title="Example job",
+        visible_text="Data Analyst Graduate. Location Sydney.",
+    )
+
+    records = AIJobExtractionClient(provider).extract_jobs_from_inputs([page_input])
+
+    assert len(records) == 1
+    assert records[0].company_name == "Example"
+    assert records[0].title == "Data Analyst Graduate"
+
+

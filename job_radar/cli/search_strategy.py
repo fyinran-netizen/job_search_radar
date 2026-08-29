@@ -8,12 +8,12 @@ import sys
 
 from pydantic import ValidationError
 
-from job_radar.ai.providers.codex_cli import CodexCliProvider
-from job_radar.ai.tasks.search_strategy import AISearchPlanBuilder, AutoSearchPlanBuilder, SearchPlanBuilder
+from job_radar.infra.llm.codex import CodexCliProvider
+from job_radar.tools.web_search.search_strategy import AISearchPlanBuilder, AutoSearchPlanBuilder, SearchPlanBuilder
 from job_radar.config import load_profile
-from job_radar.models.profile import UserProfile
+from job_radar.profile.models import UserProfile
 from job_radar.profile.completeness import ProfileCompletenessChecker
-from job_radar.utils.paths import CONFIG_DIR
+from job_radar.infra.paths import CONFIG_DIR
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -132,3 +132,5 @@ def _print_debug(builder: object, codex_provider: CodexCliProvider | None) -> No
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

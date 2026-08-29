@@ -1,0 +1,13 @@
+{
+  "candidate_count": 3,
+  "selected_count": 2,
+  "candidate_urls": [
+    "mock://future-bank/campus",
+    "mock://global-tech/graduates",
+    "mock://unrelated-forum/thread"
+  ],
+  "selected_urls": [
+    "mock://future-bank/campus",
+    "mock://global-tech/graduates"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "match_score": 86,
+  "role_fit": "high",
+  "must_have_fit": "yes",
+  "match_reasons": ["The role aligns with the profile's analytics and Python/SQL skills."],
+  "missing_requirements": [],
+  "risk_flags": [],
+  "job_summary": "Graduate data analyst role supporting reporting and data quality.",
+  "recommendation": "apply",
+  "confidence": "high"
+}

@@ -1,0 +1,5 @@
+{
+  "pending_kind": "role_list_without_jd",
+  "stage": "extraction",
+  "suggested_next_action": "find_detail_pages_for_role_titles"
+}

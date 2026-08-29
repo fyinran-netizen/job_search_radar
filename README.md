@@ -1,317 +1,164 @@
 # Job Radar
 
-Job Radar is a local job discovery, matching, and application tracking tool. The current version is phase one: it establishes a clear project architecture, SQLite persistence, and a minimal Streamlit interface.
+Job Radar is a local-first job discovery, matching, and application-tracking tool. The current release is an agent v1 architecture and end-to-end demonstration, not a general-purpose recruitment crawler.
 
-This is not a complete web-wide recruitment crawler. The current focus is architecture, data pipeline behavior, and local job management.
-
-The long-term direction is the agent workflow in `docs/job_search_agent_full_flow.svg`: program-controlled orchestration, structured AI decisions, bounded tool execution, deterministic validation, and local persistence. The SVG is a planning aid; this README is the source of truth for what is implemented today.
-
-## Current Phase
-
-Phase one builds a working local pipeline:
+The application keeps workflow control, AI decisions, tool execution, deterministic processing, and user state separate:
 
 ```text
-Data Source -> Tool/Extractor -> Raw Job Records -> Validation -> Normalization
--> Deduplication -> Matching -> Persistence -> Service -> Streamlit UI
+Profile -> Agent Controller -> ToolExecutor -> Page/Job Tools
+       -> Validation -> Normalization -> Deduplication -> Matching
+       -> SQLite Repository -> Streamlit UI
 ```
 
-The project also includes a local agent-shaped pipeline. The first runnable version is intentionally chain-based rather than a fully dynamic graph: Python owns the order of operations, AI returns bounded structured outputs, and tools execute through `ToolExecutor`.
+## Current capabilities
 
-The current chain is:
+- Streamlit profile form and persisted job table with editable status and notes.
+- Bounded agent loop with validated `AgentState`, explicit `AgentLimits`, action transitions, and decision tracing.
+- Deterministic `RuleBasedController` for the current baseline, with an `LLMController` boundary available for structured decisions.
+- Deterministic profile completeness checks before search planning.
+- Mock web search and mock page collection for network-free development and tests.
+- Optional Tavily web search and Python HTTP page collection for explicitly configured real searches.
+- Page processing in two stages: deterministic technical triage/cleaning, followed by optional semantic classification.
+- Structured job extraction, job understanding, and match analysis tools with Pydantic validation and deterministic fallbacks.
+- Recoverable handling for invalid records, rejected pages, and pending follow-ups; one bad item does not fail the whole run.
+- SQLite persistence with duplicate protection and preservation of user-managed status and notes.
+- Local runtime/cache paths under `.local_tmp/` when using the provided uv wrapper.
+
+The mock path must remain deterministic and must not call a real LLM API or make network requests. Real collection is opt-in through configured tools and providers. Automatic broad crawling, Playwright automation, login flows, and automated applications are outside the current scope.
+
+## Architecture
+
+### Agent layer
+
+`job_radar/agent/` owns the bounded workflow contract:
+
+- `models.py`: validated run state, limits, errors, and run results.
+- `actions.py`: allowed action names and state transitions.
+- `controllers/`: controller interface plus rule-based and LLM controller implementations.
+- `guardrails.py` and `limits.py`: source selection and run bounds.
+- `search_review.py`: search-round review decisions.
+
+### Tools and processing
+
+`job_radar/tools/` contains callable capabilities registered with `ToolExecutor`:
+
+- `web_search/`: search plans, source selection, mock provider, and optional Tavily provider.
+- `page_collection/`: mock, HTTP, and browser page collection models/tools.
+- `page_processing/`: page cleaning, technical triage, recovery, and semantic routing.
+- `job_extraction/`: raw/job models, extraction, validation, normalization, and quality checks.
+- `job_understanding/`: structured job requirement analysis.
+- `match_analysis/`: basic gates, deterministic scoring, and optional semantic matching.
+
+Every tool call goes through `ToolExecutor`, which restricts calls to registered tools and records a compact execution trace.
+
+### Infrastructure and application boundaries
+
+- `job_radar/profile/`: profile models, normalization, construction, and completeness checks.
+- `job_radar/infra/llm/`: provider adapters for Codex CLI and Ollama, prompt loading, and structured output validation.
+- `job_radar/infra/http/`: HTTP client support.
+- `job_radar/infra/storage/`: SQLite initialization and repository methods.
+- `job_radar/infra/paths.py`: project-relative config and data paths.
+- `job_radar/services/`: application use cases, including the bounded agent service and ingestion orchestration.
+- `job_radar/frontend/`: Streamlit presentation and UI-facing view/service helpers.
+- `job_radar/cli/`: command-line entry points for individual pipeline stages.
+
+## Agent v1 flow
+
+The current controller-driven flow is:
 
 ```text
-UserProfile
--> Python required-field completeness check
--> AI or deterministic SearchPlan generation
+Profile completeness gate
+-> SearchPlan
 -> web_search
+-> bounded source selection
 -> collect_page
--> Python technical PageFilter
--> AIPageInput trimming
--> AI semantic page routing
--> future AI job extraction
--> Pydantic validation
--> normalization / deduplication / matching / persistence
+-> technical page triage and cleaning
+-> semantic page routing
+-> job extraction
+-> job understanding
+-> match analysis
+-> persistence
 ```
 
-This is still agent-oriented because the project already separates AI decisions, tool execution, deterministic guardrails, and run state. It is not yet a free-form agent that lets AI choose arbitrary tools.
+Each stage updates validated state. Limits such as maximum rounds, sources per round, relevance threshold, and retained results are enforced in Python. AI-backed components return structured Pydantic models; deterministic components remain the default for tests and mock execution.
 
-There is also a manual URL pipeline for early page-structure testing. It reads explicit URLs from `config/sources.example.yaml` or private `config/sources.yaml`, fetches those pages with Python stdlib HTTP, extracts visible text, and converts simple JD detail pages into `RawJobRecord` objects before entering the existing pipeline.
-
-Profile completeness is intentionally checked by deterministic Python rules. Future AI profile extraction can populate candidate fields from resumes or user notes, but code decides whether required fields are present before search strategy generation.
-
-When the Streamlit app runs the mock agent search, it tries to generate the search plan through the local Codex CLI if `codex` is installed and logged in on the user's machine. That uses the active user's own Codex account. If Codex is unavailable or fails to return valid JSON, Job Radar falls back to the deterministic local search-plan builder.
-
-For command-line experiments, the project also has a Codex-backed `web_search` tool adapter. It is designed so a cloned project can use the current user's local Codex login and quota. If Codex is unavailable, mock data remains available for demos and tests.
-
-## Completed Features
-
-- Pydantic models for raw and processed job records.
-- Recoverable validation errors for bad records.
-- Basic company, title, and location normalization.
-- Deterministic deduplication by company, title, and location.
-- Explainable rule-based matching from YAML config.
-- SQLite initialization and upsert persistence.
-- Duplicate imports do not create duplicate rows and are reported as updates.
-- User-managed status and notes are preserved on re-import.
-- Streamlit UI for running real/mock search, editing status/notes, and exporting CSV.
-- Mock agent workflow with mock web search, mock page collection, extractor-based structuring, and real Pipeline persistence.
-- Manual URL workflow with configured JD URLs, Python HTTP page collection, rule-based extraction, and real Pipeline persistence.
-- Deterministic profile completeness gate for required fields such as target roles, skills, and graduation year/date.
-- Optional Codex CLI-backed search strategy generation with deterministic fallback.
-- Codex CLI-backed `web_search` CLI slice for generating `CandidateSource` URLs from a static `SearchPlan`.
-- Python HTTP page collection and technical page routing before AI semantic classification.
-- AI semantic page routing that separates job-detail pages from listings, portals, recruitment programs, career homes, and irrelevant pages before extraction.
-- `AIPageInput` trimming so AI job extraction receives only `url`, `final_url`, `title`, and cleaned visible text instead of search-stage metadata.
-- Extractor boundary for `PageContent -> RawJobRecord`, with a rule-based implementation now and an LLM adapter ready for future API integration.
-- pytest coverage for models, pipeline, repository, tools, agent flow, and app import.
-
-## Not Implemented Yet
-
-- Real recruitment website crawling.
-- Fully integrated real web search inside the Streamlit pipeline.
-- General-purpose crawling across recruitment websites.
-- Real LLM API calls outside local Codex CLI experiments.
-- Search engine integration outside the Codex-backed CLI adapter.
-- WeChat/public account collection.
-- Full link verification and job-closed detection.
-- LLM parsing or matching in the main Streamlit pipeline.
-- Automatic applications.
-- Resume generation.
-- Cloud deployment, user login, Docker, or CI/CD.
-
-## Tech Stack
-
-- Python 3.11+
-- uv
-- Streamlit
-- SQLite
-- pandas
-- Pydantic
-- PyYAML
-- pytest
-- pathlib
-
-## Project Structure
+## Project layout
 
 ```text
-app.py                         Streamlit UI
-config/                        Example YAML configuration
-docs/                          Architecture and pipeline docs
-job_radar/agent/               Workflow orchestration, state, guardrails, limits
-job_radar/ai/                  Skill loading, prompts, AI tasks, Codex CLI provider
-job_radar/extractors/          PageContent to RawJobRecord extraction boundary
-job_radar/tools/               ToolExecutor and deterministic function tools
-job_radar/models/              Pydantic models
-job_radar/pipeline/            Validation, normalization, deduplication, matching
-job_radar/storage/             SQLite database and repository
-job_radar/services/            UI-facing application services
-tests/                         Automated tests
-```
-
-See `docs/project_structure.md` for more detail.
-
-## Pipeline Overview
-
-The current runnable pipeline is the deterministic core of the future agent workflow.
-
-1. Tools or extractors return `RawJobRecord` objects.
-2. `validate_records` checks required fields and records invalid rows.
-3. `normalize_records` standardizes display fields and deduplication keys.
-4. `deduplicate_records` removes obvious duplicate jobs.
-5. `match_records` calculates a transparent score and reasons.
-6. `JobRepository` saves jobs to `data/jobs.db` and reports inserted, updated, and failed writes.
-7. `JobService` reads and updates jobs for Streamlit.
-
-The mock agent path runs before the same local pipeline:
-
-```text
-ProfileCompletenessChecker -> AutoSearchPlanBuilder/SearchPlanBuilder -> ToolExecutor
--> mock web_search -> mock collect_page -> RuleBasedJobExtractor
--> Validation -> Normalization -> Deduplication -> Matching -> SQLite
-```
-
-The experimental real-search CLI path is:
-
-```text
-SearchPlan JSON
--> Codex-backed web_search
--> CandidateSource[] JSON
--> HttpPageTool collect_page
--> PageFilter technical routing
--> AIPageInput trimming
--> AI semantic page routing
-```
-
-The page filter is deliberately technical. It rejects only obvious hard failures such as fetch errors, bad HTTP status codes, explicit error redirects, 404/not found pages, closed jobs, ended recruitment, or obvious login walls. Short pages, empty rendered bodies, or pages with recoverable metadata become recoverable pending items instead of being interpreted semantically by Python.
-
-Before AI job extraction, `AIPageInput` removes search-stage fields such as `relevance_score`, source-selection `reason`, `company_type`, `is_official`, and link metadata. This reduces token usage and avoids biasing the extractor with earlier AI guesses.
-
-## Agentic Upgrade Path
-
-The current design can grow into a more agentic workflow without replacing the chain. The intended progression is:
-
-1. Keep the single-round chain fixed until search, page collection, extraction, validation, and persistence work end to end.
-2. Add real AI job extraction behind `LLMJobExtractor` using the existing `AIPageInput` boundary.
-3. Add run logging for `SearchPlan`, `CandidateSource`, page-filter decisions, token usage, and tool events.
-4. Add a narrow `search-review` / `ContinueDecision` step after one full round.
-5. Let AI propose the next bounded search round only after Python validates max rounds, budgets, privacy rules, duplicate queries, and allowed tools.
-6. Add AI `ToolPlan` later, only when there are multiple real search tools worth choosing between.
-
-The agent boundary is therefore:
-
-```text
-AI proposes structured decisions.
-Python validates decisions and controls the workflow.
-ToolExecutor executes only allowed tools.
-Pipeline code validates, normalizes, deduplicates, persists, and protects user state.
-```
-
-The manual URL path also feeds the same local pipeline:
-
-```text
-ManualSourceTool -> HttpPageTool -> RuleBasedJobExtractor
--> Validation -> Normalization
--> Deduplication -> Matching -> SQLite
+app.py                    Streamlit entry point
+config/                   Example YAML configuration
+docs/                     Architecture and pipeline documentation
+job_radar/agent/          Agent state, actions, controllers, and guardrails
+job_radar/frontend/       Streamlit UI and view models
+job_radar/infra/          HTTP, LLM, logging, paths, runtime, and SQLite
+job_radar/profile/        User profile models and completeness checks
+job_radar/services/       Application-level orchestration
+job_radar/tools/          Registered search, collection, processing, and analysis tools
+tests/                    Unit, integration, smoke, fixtures, and test doubles
 ```
 
 ## Installation
 
-On Windows, use the project-local uv wrapper to keep uv cache, uv-managed Python installs, and temp files under `.local_tmp/` instead of the user profile on `C:`.
+Python 3.11+ and [uv](https://docs.astral.sh/uv/) are required. On Windows, the project wrapper keeps uv-managed files and temporary runtime artifacts inside the repository:
 
 ```powershell
 .\scripts\uv-local.ps1 sync
 ```
 
-If an older `.venv` points to a missing uv-managed Python under the user profile, rebuild it inside the project:
-
-```powershell
-.\scripts\uv-local.ps1 sync --python 3.13.13 --reinstall
-```
-
-On other systems, either set the same environment variables or run uv directly:
+On other systems:
 
 ```bash
-UV_CACHE_DIR=.local_tmp/uv-cache UV_PYTHON_INSTALL_DIR=.local_tmp/uv-python uv sync
+uv sync
 ```
 
-## Start The App
+Private configuration is read from these files when present, otherwise the corresponding examples are used:
+
+- `config/profile.yaml`
+- `config/sources.yaml`
+- `config/matching_rules.yaml`
+- root `.env` for provider settings
+
+Copy and edit the example files locally as needed. They are intentionally excluded from Git when they contain personal data or credentials.
+
+## Run the app
 
 ```powershell
 .\scripts\uv-local.ps1 run streamlit run app.py
 ```
 
-On first startup, the app initializes the local SQLite database automatically.
+The app initializes `data/jobs.db` on first use. The profile form runs the bounded agent service. The testing tools use mock providers and are intended for local development checks.
 
-The UI has two ingestion actions:
+## CLI pipeline
 
-- `Run mock agent search`: generates a search plan with local Codex CLI when available, then runs the abstract tool workflow with local mock search/page data.
-- `Fetch manual source URL`: fetches explicitly configured JD URLs and runs the same local pipeline.
-
-## CLI Experiments
-
-Generate a search strategy:
+The CLI commands can be run independently against JSON artifacts in a temporary directory:
 
 ```powershell
 .\scripts\uv-local.ps1 run python -m job_radar.cli.search_strategy --provider codex --show-meta
+.\scripts\uv-local.ps1 run python -m job_radar.cli.web_search --provider mock --plan-file .test_tmp/search_plan.json --max-sources 5
+.\scripts\uv-local.ps1 run python -m job_radar.cli.collect_pages --sources-file .test_tmp/candidate_sources.json --output-run-dir .test_tmp/page_run
+.\scripts\uv-local.ps1 run python -m job_radar.cli.clean_pages --pages-file .test_tmp/page_run/readable_pages.json --output-file .test_tmp/page_run/cleaned_pages.json
+.\scripts\uv-local.ps1 run python -m job_radar.cli.classify_pages --cleaned-pages-file .test_tmp/page_run/cleaned_pages.json --output-jd-cleaned-pages-file .test_tmp/page_run/jd_cleaned_pages.json
+.\scripts\uv-local.ps1 run python -m job_radar.cli.extract_jobs --cleaned-pages-file .test_tmp/page_run/jd_cleaned_pages.json --output-run-dir .test_tmp/page_run
+.\scripts\uv-local.ps1 run python -m job_radar.cli.understand_jobs --prepared-jobs-file .test_tmp/page_run/prepared_jobs.json --output-file .test_tmp/page_run/job_understandings.json
+.\scripts\uv-local.ps1 run python -m job_radar.cli.analyze_matches --job-understandings-file .test_tmp/page_run/job_understandings.json --output-file .test_tmp/page_run/match_assessments.json
 ```
 
-Run web search from a static plan:
+Provider-backed commands require the relevant local configuration. The mock provider and fixtures are the supported network-free path.
 
-```powershell
-.\scripts\uv-local.ps1 run python -m job_radar.cli.web_search --provider codex --plan-file .test_tmp/search_plan_example.json --max-sources 5
-```
-
-Collect pages and run hard-failure filtering:
-
-```powershell
-.\scripts\uv-local.ps1 run python -m job_radar.cli.collect_pages --sources-file .test_tmp/candidate_sources_example.json --plan-file .test_tmp/search_plan_example.json --timeout-seconds 15 --snippet-chars 500 --output-run-dir .test_tmp/page_runs
-```
-
-The terminal output is a compact filter report. `--output-run-dir` overwrites `readable_pages.json`, `pending_pages.json`, `pending_followups.json`, and `page_collection_report.json` in the given artifact directory. `rejected_pages` in the report are hard failures such as closed jobs or bad redirects. Short or unresolved pages become pending before extraction. `readable_pages.json` contains fetched pages that passed deterministic collection checks and can be cleaned.
-
-Clean readable pages into AI extraction inputs:
-
-```powershell
-.\scripts\uv-local.ps1 run python -m job_radar.cli.clean_pages --pages-file .test_tmp/page_runs/readable_pages.json --output-file .test_tmp/page_runs/cleaned_pages.json --report-file .test_tmp/page_runs/page_cleaning_report.json --max-text-chars 12000
-```
-
-`cleaned_pages.json` contains `AIPageInput[]` records with cleaned text plus deterministic provenance: source URLs, source metadata, official-source status, and typed links such as attachments or apply links. Only `page_id`, `title`, and `visible_text` are sent to the AI extraction prompt. The program injects provenance and links into extracted records after the semantic response, so the model cannot rewrite them. The original readable page artifact remains available for audit and retries.
-
-Run semantic page routing so only clear job-detail pages proceed to extraction:
-
-```powershell
-.\scripts\uv-local.ps1 run python -m job_radar.cli.classify_pages --cleaned-pages-file .test_tmp/page_runs/cleaned_pages.json --pending-followups-file .test_tmp/page_runs/pending_followups.json --output-jd-cleaned-pages-file .test_tmp/page_runs/jd_cleaned_pages.json --output-pending-followups-file .test_tmp/page_runs/pending_followups.json --output-report-file .test_tmp/page_runs/page_classification_report.json
-```
-
-`jd_cleaned_pages.json` contains only `AIPageInput[]` pages the local semantic page router identified as `job_detail` based on cleaned `visible_text`. Other readable pages are merged into `pending_followups.json` for a later agent step, with fields such as `pending_kind`, `reasons`, `evidence`, `suggested_next_action`, `priority`, `role_titles`, and `links`.
-
-Extract jobs from cleaned pages, then validate, normalize, and deduplicate them without matching or persistence:
-
-```powershell
-uv run python -m job_radar.cli.extract_jobs --cleaned-pages-file .test_tmp/page_runs/jd_cleaned_pages.json --output-run-dir .test_tmp/page_runs
-```
-
-By default this uses the local Ollama HTTP API and reads model settings from the private project `.env` file. Override with `--ollama-model` or `--provider codex` if needed.
-
-The project loads a private root `.env` file during Python startup. Model settings are task-specific so each AI node is explicit:
-
-- `JOB_RADAR_PAGE_CLASSIFICATION_OLLAMA_MODEL` for pre-extraction semantic page routing, normally `qwen3:8b`.
-- `JOB_RADAR_EXTRACTION_OLLAMA_MODEL` for extraction from cleaned pages, normally `gpt-oss:20b-cloud`.
-- `JOB_RADAR_UNDERSTANDING_OLLAMA_MODEL` for job requirement understanding, normally `gpt-oss:20b-cloud`.
-- `JOB_RADAR_MATCH_OLLAMA_MODEL` for semantic match analysis, normally `gpt-oss:20b-cloud`.
-- `OLLAMA_BASE_URL` for the local Ollama HTTP server, normally `http://localhost:11434`.
-
-This writes `prepared_jobs.json` and, when unresolved pages are detected after extraction, `pending_followups.json`. Duplicate records, invalid records, pending follow-ups, and the extraction report are printed to the terminal. `prepared_jobs.json` is the structured, validated, normalized, deduplicated job artifact intended for program basic gates and job understanding; sparse role-list pages stay pending instead of being forced into later analysis.
-
-When a company-first review view is needed, derive it in code with `job_radar.pipeline.job_grouping.group_jobs_by_company(prepared_records)`. That keeps one job-level artifact for downstream analysis while letting review/reporting code show a company such as Bank of China once with its jobs nested underneath.
-
-To write that company-first view from an existing `prepared_jobs.json` artifact:
-
-```powershell
-.\scripts\uv-local.ps1 run python -m job_radar.cli.group_prepared_jobs --prepared-jobs-file .test_tmp/page_runs_2027/prepared_jobs.json --output-file .test_tmp/page_runs_2027/prepared_companies.json
-```
-
-Understand prepared jobs before matching. This runs program-owned basic gates first, then sends continuing jobs to local Ollama for discipline-neutral requirement understanding:
-
-```powershell
-uv run python -m job_radar.cli.understand_jobs --prepared-jobs-file .test_tmp/page_runs/prepared_jobs.json --output-file .test_tmp/page_runs/job_understandings.json
-```
-
-`job_understandings.json` contains one `JobUnderstandingRecord` per processed job. Each record includes the full job snapshot, the `basic_gate` result, and, when not skipped by the gate, structured `JobRequirementFacts` extracted from description, requirements, and metadata. This artifact is the input for matching.
-
-Analyze understood jobs against the local profile with deterministic hard rules and one Ollama semantic matching call per eligible job:
-
-```powershell
-uv run python -m job_radar.cli.analyze_matches --job-understandings-file .test_tmp/page_runs/job_understandings.json --output-file .test_tmp/page_runs/match_assessments.json
-```
-
-The CLI is only the execution entry point. Model calls go through `OllamaProvider`, and the semantic matcher uses separate system and user chat messages. Program-owned rules run first and take priority: expired deadlines, explicit graduation-year mismatches, and fully excluded locations bypass AI and return a deterministic `skip`; non-official sources and partial excluded-location matches become deterministic risk flags or score caps. AI returns validated structured JSON, then deterministic caps, risks, and missing requirements are merged into the final assessment.
-
-## Run Tests
+## Tests
 
 ```powershell
 .\scripts\uv-local.ps1 run pytest
 ```
 
-## Configuration
+The suite covers models, tools, processing, pipeline behavior, repository persistence, agent actions/controllers/services, and Streamlit import smoke checks.
 
-The app looks for private config files first:
+## Scope and roadmap
 
-- `config/profile.yaml`
-- `config/sources.yaml`
-- `config/matching_rules.yaml`
+Current work focuses on a safe, observable single-round agent slice. Future work can add richer orchestrator decisions, explicit run logging, iterative search review, real LLM extraction, stronger deduplication, link/job-closure verification, and additional career-site tools after their limits and privacy rules are defined.
 
-If a private file is missing, the app uses the matching `.example.yaml` file and reports that in the UI. Private configs are ignored by Git.
+The project does not currently provide automatic applications, resume generation, cloud deployment, authentication, or unrestricted crawling.
 
 ## Privacy
 
-The repository should not include real names, emails, phone numbers, resumes, private notes, personal configs, local databases, or real application history. Real databases and personal configuration files are excluded by `.gitignore`.
-
-## Roadmap
-
-- Add real company career-site tools.
-- Add CSV import for external job lists.
-- Improve deduplication beyond exact normalized keys.
-- Add richer matching rules and profile configuration.
-- Add application timeline fields for written tests, interviews, offers, and deadlines.
-- Add portfolio-oriented GitHub documentation and screenshots.
+Do not commit real names, email addresses, phone numbers, resumes, private notes, personal configuration, local databases, logs containing personal data, or application history. Use the example configuration and test fixtures for reproducible development.

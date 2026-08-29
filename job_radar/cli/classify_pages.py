@@ -1,30 +1,31 @@
-"""Run Stage 2 semantic page routing before extraction."""
+"""Run Stage 2 semantic page classification before extraction."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
-from job_radar.ai.providers.ollama import OllamaProvider
-from job_radar.ai.tasks.job_extraction import AIPageInput
-from job_radar.ai.tasks.page_classification import (
+from job_radar.config import load_runtime_settings
+from job_radar.infra.llm.ollama import OllamaProvider
+from job_radar.tools.job_extraction.models import AIPageInput
+from job_radar.tools.page_processing.semantic_classification import (
     PageSemanticClassification,
     PageSemanticClassifier,
     pending_followup_from_semantic_classification,
 )
-from job_radar.models.page_triage import PendingFollowup
+from job_radar.tools.page_processing.models import PendingFollowup
 
 
 def main(argv: list[str] | None = None) -> int:
     """Classify cleaned AI page inputs and separate extractable JDs from pending pages."""
 
-    parser = argparse.ArgumentParser(description="Run semantic page routing before extraction.")
+    settings = load_runtime_settings()
+    parser = argparse.ArgumentParser(description="Run semantic page classification before extraction.")
     parser.add_argument("--cleaned-pages-file", required=True, help="Path to cleaned AIPageInput[] JSON.")
     parser.add_argument("--pending-followups-file", help="Existing PendingFollowup[] JSON to merge.")
     parser.add_argument("--output-jd-cleaned-pages-file", required=True, help="Path to write JD AIPageInput[] JSON.")
@@ -33,12 +34,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout-seconds", type=int, default=90)
     parser.add_argument(
         "--ollama-model",
-        default=os.environ.get("JOB_RADAR_PAGE_CLASSIFICATION_OLLAMA_MODEL", "qwen3:8b"),
-        help="Ollama model used for semantic page routing.",
+        default=settings.page_processing.model,
+        help="Ollama model used for semantic page classification.",
     )
     parser.add_argument(
         "--ollama-base-url",
-        default=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
+        default=settings.ollama_base_url,
         help="Local Ollama server base URL.",
     )
     args = parser.parse_args(argv)
@@ -183,3 +184,5 @@ def _source_name_from_url(url: str) -> str:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
