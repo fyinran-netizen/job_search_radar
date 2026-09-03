@@ -10,7 +10,7 @@ from job_radar.agent.actions import (
 from job_radar.agent.models import AgentLimits, AgentState
 from job_radar.tools.base import BaseTool
 from job_radar.tools.executor import ToolExecutor
-from job_radar.tools.page_collection.models import PageContent
+from job_radar.tools.page_acquisition.models import PageDocument
 from job_radar.tools.job_extraction.models import AIPageInput, RawJobRecord
 from job_radar.tools.job_extraction.normalization import normalize_records
 from job_radar.tools.job_understanding.models import JobUnderstandingRecord
@@ -34,20 +34,20 @@ class RecordingSearchTool(BaseTool):
 
 
 class RecordingPageTool(BaseTool):
-    name = "collect_page"
+    name = "acquire_page"
 
     def __init__(self):
         self.urls = []
 
     def run(self, payload):
         self.urls.append(payload.url)
-        return PageContent(url=payload.url, source_name=payload.source_name, html="<html />")
+        return PageDocument(url=payload.url, source_name=payload.source_name, html="<html />")
 
 
 def test_action_model_has_only_v1_actions_and_batch_collection():
-    action = AgentAction(action="collect_page", rationale="Collect selected sources")
+    action = AgentAction(action="acquire_page", rationale="Collect selected sources")
 
-    assert action.action == "collect_page"
+    assert action.action == "acquire_page"
     assert "source_url" not in action.model_dump()
     with pytest.raises(ValueError, match="stop requires stop_reason"):
         AgentAction(action="stop", rationale="Done")
@@ -58,8 +58,8 @@ def test_action_availability_requires_stage_inputs():
     limits = AgentLimits()
 
     assert action_availability("web_search", state, limits).reasons == ["search_plan is missing"]
-    assert action_availability("collect_page", state, limits).available is False
-    assert action_availability("page_processing", state, limits).available is False
+    assert action_availability("acquire_page", state, limits).available is False
+    assert action_availability("analyze_page", state, limits).available is False
     assert action_availability("job_extraction", state, limits).available is False
     assert action_availability("job_understanding", state, limits).available is False
     assert action_availability("match_analysis", state, limits).available is False
@@ -80,24 +80,24 @@ def test_web_search_advances_round_and_selects_sources():
     assert len(result.selected_sources) == 1
 
 
-def test_collect_page_is_batch_level_and_skips_already_handled_sources():
+def test_acquire_page_is_batch_level_and_skips_already_handled_sources():
     first = CandidateSource(url="https://example.test/1", title="1", source_name="Example")
     second = CandidateSource(url="https://example.test/2", title="2", source_name="Example")
     page_tool = RecordingPageTool()
     state = AgentState(
         selected_sources=[first, second],
-        collected_pages=[PageContent(url=first.url, source_name=first.source_name)],
+        acquired_pages=[PageDocument(url=first.url, source_name=first.source_name)],
     )
 
     result = execute_action(
-        AgentAction(action="collect_page", rationale="Collect remaining sources"),
+        AgentAction(action="acquire_page", rationale="Collect remaining sources"),
         state,
         ToolExecutor([page_tool]),
         AgentLimits(),
     )
 
     assert page_tool.urls == [second.url]
-    assert [page.url for page in result.collected_pages] == [first.url, second.url]
+    assert [page.url for page in result.acquired_pages] == [first.url, second.url]
 
 
 def test_stage_actions_are_unavailable_after_their_batch_is_marked_complete():
@@ -115,11 +115,11 @@ def test_stage_actions_are_unavailable_after_their_batch_is_marked_complete():
         source="skipped_by_basic_gate",
     )
     state = AgentState(
-        collected_pages=[PageContent(url=url, source_name="Example")],
-        processed_pages=[
+        acquired_pages=[PageDocument(url=url, source_name="Example")],
+        job_detail_pages=[
             AIPageInput(url=url, title="Job", visible_text="description")
         ],
-        processed_page_urls=[url],
+        analyzed_page_urls=[url],
         extracted_page_urls=[url],
         prepared_jobs=[job],
         understood_job_keys=[job.deduplication_key],
@@ -129,7 +129,7 @@ def test_stage_actions_are_unavailable_after_their_batch_is_marked_complete():
     limits = AgentLimits()
     profile = UserProfile(target_roles=["Job"])
 
-    assert not action_availability("page_processing", state, limits).available
+    assert not action_availability("analyze_page", state, limits).available
     assert not action_availability("job_extraction", state, limits).available
     assert not action_availability("job_understanding", state, limits, profile=profile).available
     assert not action_availability("match_analysis", state, limits, profile=profile).available

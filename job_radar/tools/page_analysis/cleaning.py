@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 
 from pydantic import BaseModel
 from trafilatura import extract
-from job_radar.tools.page_collection.models import PageContent
+from job_radar.tools.page_acquisition.models import PageDocument
 
 
 class _HTMLContentParser(HTMLParser):
@@ -59,7 +59,7 @@ class _HTMLContentParser(HTMLParser):
         self.text_parts.append(value)
 
 
-def parse_collected_page(page: PageContent) -> PageContent:
+def parse_acquired_page(page: PageDocument) -> PageDocument:
     """Derive title, visible text, and links from raw collected content."""
     if not page.html:
         return page

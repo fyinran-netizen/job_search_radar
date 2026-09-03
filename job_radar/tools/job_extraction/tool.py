@@ -32,7 +32,7 @@ from job_radar.tools.job_extraction.validation import (
     validate_records,
 )
 
-from job_radar.tools.page_processing.models import (
+from job_radar.tools.page_analysis.models import (
     PendingFollowup,
 )
 

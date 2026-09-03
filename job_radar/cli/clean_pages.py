@@ -1,4 +1,4 @@
-"""Clean readable PageContent records into AI extraction inputs."""
+"""Clean readable PageDocument records into AI extraction inputs."""
 
 from __future__ import annotations
 
@@ -12,15 +12,15 @@ from pydantic import TypeAdapter, ValidationError
 
 from job_radar.tools.job_extraction.extraction import build_ai_page_input
 from job_radar.tools.job_extraction.models import AIPageInput
-from job_radar.tools.page_collection.models import PageContent
-from job_radar.tools.page_processing.cleaning import clean_page_text
+from job_radar.tools.page_acquisition.models import PageDocument
+from job_radar.tools.page_analysis.cleaning import clean_page_text
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Convert readable PageContent[] into cleaned AIPageInput[]."""
+    """Convert readable PageDocument[] into cleaned AIPageInput[]."""
 
     parser = argparse.ArgumentParser(description="Clean readable pages before AI extraction.")
-    parser.add_argument("--pages-file", required=True, help="Path to readable PageContent[] JSON.")
+    parser.add_argument("--pages-file", required=True, help="Path to readable PageDocument[] JSON.")
     parser.add_argument("--output-file", required=True, help="Path to write cleaned AIPageInput[] JSON.")
     parser.add_argument("--report-file", help="Optional path to write cleaning report JSON.")
     parser.add_argument("--max-text-chars", type=int, default=12000)
@@ -82,9 +82,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _load_pages(path: str) -> list[PageContent]:
+def _load_pages(path: str) -> list[PageDocument]:
     with open(path, encoding="utf-8-sig") as file:
-        return TypeAdapter(list[PageContent]).validate_python(json.load(file))
+        return TypeAdapter(list[PageDocument]).validate_python(json.load(file))
 
 
 def _write_json(path: str, payload: object) -> None:

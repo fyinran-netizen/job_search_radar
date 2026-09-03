@@ -7,9 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from job_radar.profile.models import ProfileCompletenessResult
 from job_radar.tools.job_extraction.models import AIPageInput, JobRecord
 from job_radar.tools.job_understanding.models import JobUnderstandingRecord
-from job_radar.tools.page_collection.models import PageContent, ToolEvent
-from job_radar.tools.page_processing.models import PendingFollowup
-from job_radar.tools.page_processing.technical_triage import RejectedPage
+from job_radar.tools.page_acquisition.models import PageDocument, RejectedPage, ToolEvent
+from job_radar.tools.page_analysis.models import PendingFollowup
 from job_radar.tools.web_search.models import CandidateSource, SearchPlan
 
 
@@ -37,6 +36,8 @@ class AgentLimits(BaseModel):
         ge=1,
         description="Maximum accumulated job results retained for a run.",
     )
+    max_steps: int = Field(default=25, ge=1)
+    max_queries_per_round: int = Field(default=6, ge=1)
 
 
 class AgentError(BaseModel):
@@ -62,15 +63,19 @@ class AgentState(BaseModel):
     notices: list[str] = Field(default_factory=list)
 
     search_plan: SearchPlan | None = None
+    query_history: list[str] = Field(default_factory=list)
+    executed_queries: list[str] = Field(default_factory=list)
+    search_round_results: list[list[CandidateSource]] = Field(default_factory=list)
+    last_search_outcome: str | None = None
     candidate_sources: list[CandidateSource] = Field(default_factory=list)
     selected_sources: list[CandidateSource] = Field(default_factory=list)
 
-    collected_pages: list[PageContent] = Field(default_factory=list)
-    processed_pages: list[AIPageInput] = Field(default_factory=list)
+    acquired_pages: list[PageDocument] = Field(default_factory=list)
+    job_detail_pages: list[AIPageInput] = Field(default_factory=list)
     # Stage completion is tracked separately from output presence.  A stage
     # may legitimately produce no output (for example, a page with no job),
     # so downstream lists cannot be used as completion markers.
-    processed_page_urls: list[str] = Field(default_factory=list)
+    analyzed_page_urls: list[str] = Field(default_factory=list)
     extracted_page_urls: list[str] = Field(default_factory=list)
     pending_followups: list[PendingFollowup] = Field(default_factory=list)
     rejected_pages: list[RejectedPage] = Field(default_factory=list)
@@ -93,7 +98,7 @@ class AgentRunResult(BaseModel):
     search_plan_error: str | None = None
     candidate_sources: list[CandidateSource] = Field(default_factory=list)
     selected_sources: list[CandidateSource] = Field(default_factory=list)
-    collected_pages_count: int = 0
+    acquired_pages_count: int = 0
     extracted_count: int = 0
     tool_events: list[ToolEvent] = Field(default_factory=list)
     errors: list[AgentError] = Field(default_factory=list)

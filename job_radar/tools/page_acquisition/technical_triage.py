@@ -5,8 +5,8 @@ from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel, Field
 
-from job_radar.tools.page_collection.models import PageContent
-from job_radar.tools.page_processing.models import (
+from job_radar.tools.page_acquisition.models import PageDocument, RejectedPage
+from job_radar.tools.page_acquisition.models import (
     PageTechnicalRoute,
     RecoverySource,
 )
@@ -64,31 +64,19 @@ AUTH_PAGE_KEYWORDS = [
 ]
 
 
-class RejectedPage(BaseModel):
-    """A page rejected by deterministic technical rules."""
-
-    url: str
-    source_name: str
-    title: str
-
-    reasons: list[str] = Field(default_factory=list)
-    text_length: int = 0
-    metadata: dict = Field(default_factory=dict)
-
-
 class TechnicalTriageResult(BaseModel):
     """Technical triage results before deterministic recovery."""
 
-    readable_pages: list[PageContent] = Field(default_factory=list)
+    readable_pages: list[PageDocument] = Field(default_factory=list)
 
-    recoverable_pages: list[PageContent] = Field(default_factory=list)
+    recoverable_pages: list[PageDocument] = Field(default_factory=list)
     recoverable_routes: dict[str, PageTechnicalRoute] = Field(default_factory=dict)
 
     rejected_pages: list[RejectedPage] = Field(default_factory=list)
 
 
 def triage_pages(
-    pages: list[PageContent],
+    pages: list[PageDocument],
     search_plan: SearchPlan | None = None,
     min_text_length: int = 300,
 ) -> TechnicalTriageResult:
@@ -130,7 +118,7 @@ def triage_pages(
 
 
 def route_page_technically(
-    page: PageContent,
+    page: PageDocument,
     search_plan: SearchPlan | None = None,
     min_text_length: int = 300,
 ) -> PageTechnicalRoute:
@@ -193,7 +181,7 @@ def route_page_technically(
 
 
 def rejection_reasons(
-    page: PageContent,
+    page: PageDocument,
     search_plan: SearchPlan | None = None,
 ) -> list[str]:
     """Return deterministic hard-rejection reasons."""
@@ -260,7 +248,7 @@ def rejection_reasons(
 
 
 def recovery_reasons(
-    page: PageContent,
+    page: PageDocument,
     search_plan: SearchPlan | None = None,
     min_text_length: int = 300,
 ) -> list[str]:
@@ -304,7 +292,7 @@ def recovery_reasons(
 
 
 def detect_recovery_sources(
-    page: PageContent,
+    page: PageDocument,
 ) -> list[RecoverySource]:
     """Detect deterministic recovery sources available in the same page."""
 
@@ -349,7 +337,7 @@ def detect_recovery_sources(
 
 
 def summarize_page_signals(
-    page: PageContent,
+    page: PageDocument,
     search_plan: SearchPlan | None = None,
 ) -> dict[str, list[str]]:
     """Return deterministic diagnostic signals."""
@@ -416,7 +404,7 @@ def _plan_signal_matches(
 
 
 def _redirect_rejection_reason(
-    page: PageContent,
+    page: PageDocument,
 ) -> str | None:
     final_url = page.metadata.get("final_url")
 
@@ -472,7 +460,7 @@ def _reason_code(reason: str) -> str:
 
 
 def _is_auth_wall(
-    page: PageContent,
+    page: PageDocument,
     text: str,
     jd_signals: list[str],
     plan_signals: list[str],

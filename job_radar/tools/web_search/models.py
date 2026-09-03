@@ -1,19 +1,8 @@
-"""Search-related data contracts."""
+"""Search result data contracts (SearchPlan lives in search_plan)."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-
-class SearchPlan(BaseModel):
-    """Search strategy generated from a user profile."""
-
-    target_roles: list[str] = Field(default_factory=list)
-    locations: list[str] = Field(default_factory=list)
-    company_types: list[str] = Field(default_factory=list)
-    keywords: list[str] = Field(default_factory=list)
-    cohort_year: int | None = None
-    graduation_start: str | None = None
-    graduation_end: str | None = None
-    cohort_terms: list[str] = Field(default_factory=list)
+from job_radar.tools.search_plan.models import SearchPlan
 
 
 class CandidateSource(BaseModel):

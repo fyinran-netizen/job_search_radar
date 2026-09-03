@@ -1,6 +1,6 @@
 ---
 name: page-jd-classification
-description: Classify a technically processed page by semantic page type before job extraction.
+description: Classify an analyzed page by semantic page type before job extraction.
 ---
 
 # Page Semantic Classification
@@ -12,7 +12,7 @@ short or otherwise insufficient to determine the page type, use `uncertain`.
 
 ## Purpose
 
-Classify a page after deterministic technical processing, recovery, and cleaning have already been completed.
+Classify a page after acquisition (including technical routing and recovery) and deterministic cleaning have been completed.
 
 This task decides only:
 
@@ -25,13 +25,13 @@ It does not:
 - follow links;
 - extract job records;
 - perform technical fetch/readability checks;
-- perform deterministic content recovery;
+- perform page acquisition or content recovery;
 - infer hidden content;
 - rank sources;
 - compare the page with a candidate profile;
 - decide candidate-job fit.
 
-The supplied page represents the best content currently available from deterministic page processing.
+The supplied page represents the best content returned by page acquisition and cleaned by page analysis.
 
 ## Input
 
@@ -161,7 +161,7 @@ Suggested next action:
 2. Use only the supplied title, cleaned visible text, and important-link labels as evidence.
 3. Do not assume linked pages have been visited.
 4. Do not assume browser-rendered, hidden, or dynamically loaded content exists unless it is present in the supplied input.
-5. Do not perform technical recovery reasoning. Technical routing and deterministic recovery have already happened before this task.
+5. Do not perform technical recovery reasoning. Acquisition routing and deterministic recovery have already happened before this task.
 6. `job_detail` requires concrete job-level content, not merely recruitment relevance.
 7. Multiple jobs or search results should normally be `job_listing`.
 8. Role names without sufficient JD content should normally be `role_list_without_jd`.

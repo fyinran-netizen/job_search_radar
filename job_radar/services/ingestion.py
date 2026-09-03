@@ -1,4 +1,4 @@
-﻿"""Application orchestration for the Job Radar real search pipeline."""
+"""Application orchestration for the Job Radar real search pipeline."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from job_radar.agent.guardrails import select_candidate_sources
 from job_radar.agent.models import AgentLimits, AgentRunResult
 
 from job_radar.config import load_runtime_settings
@@ -38,19 +37,19 @@ from job_radar.tools.match_analysis.tool import (
     MatchAnalysisToolOutput,
 )
 
-from job_radar.tools.page_collection.models import PageContent
+from job_radar.tools.page_acquisition.models import PageDocument
 
-from job_radar.tools.page_processing.models import (
+from job_radar.tools.page_analysis.models import (
     PendingFollowup,
 )
 
-from job_radar.tools.page_processing.technical_triage import (
+from job_radar.tools.page_acquisition.technical_triage import (
     RejectedPage,
 )
 
-from job_radar.tools.page_processing.tool import (
-    PageProcessingInput,
-    PageProcessingOutput,
+from job_radar.tools.page_analysis.tool import (
+    PageAnalysisInput,
+    PageAnalysisOutput,
 )
 
 from job_radar.tools.registry import (
@@ -59,7 +58,8 @@ from job_radar.tools.registry import (
 
 from job_radar.tools.web_search.models import CandidateSource
 
-from job_radar.tools.web_search.search_strategy import SearchPlanBuilder
+from job_radar.tools.search_plan import SearchPlanBuilder
+from job_radar.tools.web_search.source_selection import select_sources
 
 
 logger = get_logger(__name__)
@@ -93,9 +93,9 @@ class IngestionService:
           ↓
         web_search
           ↓
-        page_collection
+        page_acquisition
           ↓
-        page_processing
+        analyze_page
           ↓
         job_extraction
           ↓
@@ -168,13 +168,13 @@ class IngestionService:
 
         notices.append(
             "Using Tavily-backed web search "
-            "and HTTP page collection."
+            "and HTTP page acquisition."
         )
 
         notices.append(
-            f"Using Page Processing with {metadata['page_processing_provider']} "
+            f"Using Page Analysis with {metadata['analyze_page_provider']} "
             f"semantic classification "
-            f"({metadata['page_processing_model']}), "
+            f"({metadata['analyze_page_model']}), "
             "Ollama job extraction "
             f"({metadata['extraction_model']}), "
             "job understanding "
@@ -248,60 +248,57 @@ class IngestionService:
         ]
 
         agent_result.selected_sources = (
-            select_candidate_sources(
+            select_sources(
                 agent_result.candidate_sources,
-                min_relevance_score=(
-                    limits.min_relevance_score
-                ),
-            )[
-                : limits.max_sources_per_round
-            ]
+                min_relevance_score=limits.min_relevance_score,
+                max_sources=limits.max_sources_per_round,
+            )
         )
 
         # -----------------------------------------------------
-        # Page Collection
+        # Page Acquisition
         # -----------------------------------------------------
 
         (
             pages,
-            collection_pending_followups,
-            collection_rejected_pages,
+            acquisition_pending_followups,
+            acquisition_rejected_pages,
         ) = self._collect_real_pages(
             executor,
             agent_result.selected_sources,
         )
 
         # -----------------------------------------------------
-        # Page Processing
+        # Page Analysis
         # -----------------------------------------------------
 
-        page_processing_output = executor.run(
-            "page_processing",
-            PageProcessingInput(
+        analyze_page_output = executor.run(
+            "analyze_page",
+            PageAnalysisInput(
                 pages=pages,
                 search_plan=search_plan,
             ),
         )
 
         if not isinstance(
-            page_processing_output,
-            PageProcessingOutput,
+            analyze_page_output,
+            PageAnalysisOutput,
         ):
             raise TypeError(
-                "page_processing must return "
-                "PageProcessingOutput"
+                "analyze_page must return "
+                "PageAnalysisOutput"
             )
 
         all_pending_followups = [
-            *collection_pending_followups,
-            *page_processing_output.pending_followups,
+            *acquisition_pending_followups,
+            *analyze_page_output.pending_followups,
         ]
 
         logger.info(
-            "page_processing collection_pages=%s collection_pending=%s collection_rejected=%s",
+            "analyze_page acquisition_pages=%s acquisition_pending=%s acquisition_rejected=%s",
             len(pages),
-            len(collection_pending_followups),
-            len(collection_rejected_pages),
+            len(acquisition_pending_followups),
+            len(acquisition_rejected_pages),
         )
 
         # -----------------------------------------------------
@@ -312,7 +309,7 @@ class IngestionService:
             "job_extraction",
             JobExtractionInput(
                 pages=(
-                    page_processing_output
+                    analyze_page_output
                     .accepted_pages
                 ),
             ),
@@ -468,7 +465,7 @@ class IngestionService:
         # Agent run result
         # -----------------------------------------------------
 
-        agent_result.collected_pages_count = (
+        agent_result.acquired_pages_count = (
             len(pages)
         )
 
@@ -500,7 +497,7 @@ class IngestionService:
         )
 
     # =========================================================
-    # Page Collection
+    # Page Acquisition
     # =========================================================
 
     def _collect_real_pages(
@@ -508,7 +505,7 @@ class IngestionService:
         executor: ToolExecutor,
         sources: list[CandidateSource],
     ) -> tuple[
-        list[PageContent],
+        list[PageDocument],
         list[PendingFollowup],
         list[RejectedPage],
     ]:
@@ -517,7 +514,7 @@ class IngestionService:
         fetch failures.
         """
 
-        pages: list[PageContent] = []
+        pages: list[PageDocument] = []
 
         pending_followups: list[
             PendingFollowup
@@ -530,13 +527,13 @@ class IngestionService:
         for source in sources:
             try:
                 page = executor.run(
-                    "collect_page",
+                    "acquire_page",
                     source,
                 )
 
             except Exception as exc:
                 logger.warning(
-                    "page_collection failed url=%s pending=%s reason=%s",
+                    "page_acquisition failed url=%s pending=%s reason=%s",
                     source.url,
                     self._is_pending_fetch_error(exc),
                     exc,
@@ -606,11 +603,11 @@ class IngestionService:
 
             if not isinstance(
                 page,
-                PageContent,
+                PageDocument,
             ):
                 raise TypeError(
-                    "collect_page must return "
-                    "PageContent"
+                    "acquire_page must return "
+                    "PageDocument"
                 )
 
             pages.append(page)
@@ -641,7 +638,7 @@ class IngestionService:
 
         classification_provider = str(
             metadata[
-                "page_processing_provider"
+                "analyze_page_provider"
             ]
         )
 
@@ -659,7 +656,7 @@ class IngestionService:
 
         if classification_provider != "ollama":
             raise RuntimeError(
-                "JOB_RADAR_PAGE_PROCESSING_PROVIDER must be ollama: "
+                "JOB_RADAR_PAGE_ANALYSIS_PROVIDER must be ollama: "
                 f"got {classification_provider!r}."
             )
 
@@ -685,7 +682,7 @@ class IngestionService:
             )
 
         classification_ollama = OllamaProvider(
-            model=str(metadata["page_processing_model"]),
+            model=str(metadata["analyze_page_model"]),
             base_url=str(metadata["ollama_base_url"]),
         )
 
@@ -745,7 +742,7 @@ class IngestionService:
             )
 
         return create_real_search_tool_executor(
-            page_processing_provider=(
+            analyze_page_provider=(
                 classification_ollama
             ),
             job_extraction_provider=(
@@ -937,16 +934,16 @@ class IngestionService:
         return {
             "web_search_provider": "tavily",
 
-            "page_collection_provider": (
+            "page_acquisition_provider": (
                 "http"
             ),
 
-            "page_processing_provider": (
-                settings.page_processing.provider
+            "analyze_page_provider": (
+                settings.analyze_page.provider
             ),
 
-            "page_processing_model": (
-                settings.page_processing.model
+            "analyze_page_model": (
+                settings.analyze_page.model
             ),
 
             "extraction_provider": (

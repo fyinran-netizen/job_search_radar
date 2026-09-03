@@ -11,15 +11,15 @@ from pathlib import Path
 from pydantic import TypeAdapter, ValidationError
 
 from job_radar.tools.web_search.models import CandidateSource, SearchPlan
-from job_radar.tools.page_collection.models import PageContent
-from job_radar.tools.page_processing.technical_triage import (
+from job_radar.tools.page_acquisition.models import PageDocument
+from job_radar.tools.page_acquisition.technical_triage import (
     RejectedPage,
     triage_pages,
     summarize_page_signals,
 )
-from job_radar.tools.page_processing.models import PendingFollowup
-from job_radar.tools.page_collection.http import HttpPageTool
-from job_radar.tools.page_processing.cleaning import parse_collected_page
+from job_radar.tools.page_analysis.models import PendingFollowup
+from job_radar.tools.page_acquisition.http import HttpPageTool
+from job_radar.tools.page_analysis.cleaning import parse_acquired_page
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--snippet-chars", type=int, default=500)
     parser.add_argument(
         "--output-readable-pages-file",
-        help="Optional path to write readable PageContent[] with full text, html, and metadata.",
+        help="Optional path to write readable PageDocument[] with full text, html, and metadata.",
     )
     parser.add_argument(
         "--output-pending-file",
@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         "--output-run-dir",
         help=(
             "Optional artifact directory. Overwrites readable_pages.json, pending_pages.json, "
-            "and page_collection_report.json in that directory."
+            "and page_acquisition_report.json in that directory."
         ),
     )
     args = parser.parse_args(argv)
@@ -64,12 +64,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     tool = HttpPageTool(timeout_seconds=args.timeout_seconds)
-    pages: list[PageContent] = []
+    pages: list[PageDocument] = []
     pending_fetches: list[PendingFollowup] = []
     rejected_fetches: list[RejectedPage] = []
     for source in sources:
         try:
-            pages.append(parse_collected_page(tool.run(source)))
+            pages.append(parse_acquired_page(tool.run(source)))
         except Exception as exc:
             if _is_pending_fetch_error(exc):
                 pending_fetches.append(
@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
             output_readable_pages_file = output_readable_pages_file or str(run_dir / "readable_pages.json")
             output_pending_file = output_pending_file or str(run_dir / "pending_pages.json")
             output_pending_followups_file = output_pending_followups_file or str(run_dir / "pending_followups.json")
-            output_report_file = output_report_file or str(run_dir / "page_collection_report.json")
+            output_report_file = output_report_file or str(run_dir / "page_acquisition_report.json")
             summary["artifacts"] = {"run_dir": str(run_dir)}
         if output_readable_pages_file:
             _write_json(

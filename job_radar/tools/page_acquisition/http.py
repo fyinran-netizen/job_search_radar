@@ -1,4 +1,4 @@
-"""HTTP page collection tool for manually configured URLs."""
+"""HTTP page acquisition tool for manually configured URLs."""
 
 from pathlib import Path
 import re
@@ -10,33 +10,50 @@ from urllib.error import HTTPError
 
 from pydantic import BaseModel
 
+from job_radar.infra.logging import get_logger
 from job_radar.tools.web_search.models import CandidateSource
-from job_radar.tools.page_collection.models import PageContent, PageFetchEvidence
-from job_radar.tools.page_collection.browser import BrowserPageTool
+from job_radar.tools.page_acquisition.models import PageDocument, PageFetchEvidence
+from job_radar.tools.page_acquisition.browser import BrowserPageTool
+from job_radar.tools.page_acquisition.recovery import recover_page
+from job_radar.tools.page_acquisition.technical_triage import detect_recovery_sources
 from job_radar.tools.base import BaseTool
+
+logger = get_logger(__name__)
 
 
 class HttpPageTool(BaseTool):
     """Fetch bytes/text and return collection facts, without parsing HTML."""
 
-    name = "collect_page"
+    name = "acquire_page"
 
     def __init__(self, timeout_seconds: int = 20, retries: int = 2, browser_fallback: Any = None) -> None:
         self.timeout_seconds = timeout_seconds
         self.retries = max(0, retries)
         self.browser_fallback = browser_fallback if browser_fallback is not None else BrowserPageTool(timeout_seconds=timeout_seconds)
 
-    def run(self, payload: BaseModel | dict[str, Any]) -> PageContent:
+    def run(self, payload: BaseModel | dict[str, Any]) -> PageDocument:
         """Fetch content and preserve only raw content and fetch evidence."""
 
         source = payload if isinstance(payload, CandidateSource) else CandidateSource.model_validate(payload)
+        started = time.perf_counter()
+        logger.info("acquisition_start url=%s http_retries=%s browser_fallback=%s", source.url, self.retries, type(self.browser_fallback).__name__)
         try:
             html, evidence = self._read_url(source.url)
+            logger.info("acquisition_http_complete url=%s status=%s attempts=%s html_chars=%s", source.url, evidence.status_code, evidence.attempts, len(html))
             if self._needs_browser_fallback(html, evidence):
+                candidate = self._page(source, html, evidence)
+                recovered, result = recover_page(
+                    candidate,
+                    available_sources=detect_recovery_sources(candidate),
+                )
+                if result.success:
+                    logger.info("acquisition_recovery_complete url=%s method=%s recovered_chars=%s", source.url, result.source, len(result.text))
+                    return recovered
                 raise RuntimeError("HTTP response was empty or an obvious JavaScript shell")
         except Exception as exc:
             try:
                 page = self.browser_fallback.run(source) if hasattr(self.browser_fallback, "run") else self.browser_fallback(source)
+                logger.info("acquisition_browser_complete url=%s method=%s attempts=%s html_chars=%s", source.url, page.fetch_evidence.fetch_method, page.fetch_evidence.attempts, len(page.html))
                 return page.model_copy(update={"fetch_evidence": page.fetch_evidence.model_copy(update={"fetch_method": "browser", "attempts": page.fetch_evidence.attempts + self.retries + 1})})
             except Exception as browser_exc:
                 evidence = PageFetchEvidence(
@@ -48,7 +65,14 @@ class HttpPageTool(BaseTool):
                 )
                 html = ""
         fetch_metadata = evidence.model_dump(exclude_none=True)
-        return PageContent(
+        logger.info("acquisition_complete url=%s method=%s status=%s elapsed_ms=%.1f error=%s", source.url, evidence.fetch_method, evidence.status_code, (time.perf_counter() - started) * 1000, bool(evidence.error))
+        return self._page(source, html, evidence)
+
+    @staticmethod
+    def _page(source: CandidateSource, html: str, evidence: PageFetchEvidence) -> PageDocument:
+        """Build the raw acquired document with source provenance."""
+        fetch_metadata = evidence.model_dump(exclude_none=True)
+        return PageDocument(
             url=source.url,
             source_name=source.source_name,
             title="",

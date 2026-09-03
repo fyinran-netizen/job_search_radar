@@ -13,12 +13,12 @@ from pydantic import TypeAdapter, ValidationError
 from job_radar.config import load_runtime_settings
 from job_radar.infra.llm.ollama import OllamaProvider
 from job_radar.tools.job_extraction.models import AIPageInput
-from job_radar.tools.page_processing.semantic_classification import (
+from job_radar.tools.page_analysis.semantic_classification import (
     PageSemanticClassification,
     PageSemanticClassifier,
     pending_followup_from_semantic_classification,
 )
-from job_radar.tools.page_processing.models import PendingFollowup
+from job_radar.tools.page_analysis.models import PendingFollowup
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout-seconds", type=int, default=90)
     parser.add_argument(
         "--ollama-model",
-        default=settings.page_processing.model,
+        default=settings.analyze_page.model,
         help="Ollama model used for semantic page classification.",
     )
     parser.add_argument(

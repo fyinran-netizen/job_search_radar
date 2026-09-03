@@ -4,5 +4,5 @@
     "mock://future-bank/campus",
     "mock://global-tech/graduates"
   ],
-  "content_source": "job_radar.tools.page_collection.mock.MOCK_PAGES"
+  "content_source": "job_radar.tools.page_acquisition.mock.MOCK_PAGES"
 }

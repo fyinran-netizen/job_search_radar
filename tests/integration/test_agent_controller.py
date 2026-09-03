@@ -5,7 +5,7 @@ from job_radar.agent.controllers import DecisionContext, LLMController, RuleBase
 from job_radar.agent.models import AgentLimits, AgentState
 from job_radar.profile.models import UserProfile
 from job_radar.tools.job_extraction.models import AIPageInput
-from job_radar.tools.page_collection.models import PageContent
+from job_radar.tools.page_acquisition.models import PageDocument
 from job_radar.tools.web_search.models import CandidateSource, SearchPlan
 
 
@@ -36,31 +36,31 @@ def test_rule_based_controller_collects_unprocessed_selected_sources() -> None:
     decision = decide(
         AgentState(
             selected_sources=[source],
-            collected_pages=[PageContent(url="https://example.test/other", source_name="Example")],
+            acquired_pages=[PageDocument(url="https://example.test/other", source_name="Example")],
         )
     )
 
-    assert decision.action == "collect_page"
+    assert decision.action == "acquire_page"
     assert "unprocessed" in decision.rationale
 
 
-def test_rule_based_controller_processes_collected_pages() -> None:
+def test_rule_based_controller_processes_acquired_pages() -> None:
     decision = decide(
         AgentState(
             search_plan=SearchPlan(keywords=["graduate jobs"]),
-            collected_pages=[PageContent(url="https://example.test/job", source_name="Example")],
+            acquired_pages=[PageDocument(url="https://example.test/job", source_name="Example")],
         )
     )
 
-    assert decision.action == "page_processing"
+    assert decision.action == "analyze_page"
     assert "processing" in decision.rationale
 
 
-def test_rule_based_controller_extracts_from_processed_pages() -> None:
+def test_rule_based_controller_extracts_from_job_detail_pages() -> None:
     decision = decide(
         AgentState(
             search_plan=SearchPlan(keywords=["graduate jobs"]),
-            processed_pages=[
+            job_detail_pages=[
                 AIPageInput(
                     url="https://example.test/job",
                     title="Example Job",

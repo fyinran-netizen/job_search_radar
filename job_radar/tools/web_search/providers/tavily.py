@@ -31,7 +31,7 @@ class TavilyWebSearchTool(BaseTool):
 
         sources: list[CandidateSource] = []
         seen_urls: set[str] = set()
-        for query in plan.keywords:
+        for query in plan.queries:
             if len(sources) >= self.max_sources:
                 break
             results = self._search(api_key, query, self.max_sources - len(sources))

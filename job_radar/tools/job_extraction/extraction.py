@@ -16,8 +16,8 @@ from job_radar.tools.job_extraction.models import (
     RawJobRecord,
 )
 
-from job_radar.tools.page_collection.models import PageContent
-from job_radar.tools.page_processing.cleaning import clean_page_text, parse_collected_page
+from job_radar.tools.page_acquisition.models import PageDocument
+from job_radar.tools.page_analysis.cleaning import clean_page_text, parse_acquired_page
 
 
 _VISIBLE_URL_PATTERN = re.compile(
@@ -30,7 +30,7 @@ _TRAILING_URL_PUNCTUATION = (
 
 
 def build_ai_page_input(
-    page: PageContent,
+    page: PageDocument,
     max_text_chars: int = 12000,
 ) -> AIPageInput:
     """
@@ -40,7 +40,7 @@ def build_ai_page_input(
     Deterministic provenance is preserved outside AI output.
     """
 
-    page = parse_collected_page(page)
+    page = parse_acquired_page(page)
     final_url = page.metadata.get("final_url")
 
     return AIPageInput(
@@ -83,7 +83,7 @@ def build_ai_page_input(
 
 
 def extract_important_links(
-    page: PageContent,
+    page: PageDocument,
     max_links: int = 10,
 ) -> list[ImportantLink]:
     """
@@ -196,7 +196,7 @@ class AIJobExtractionClient:
 
     def extract_jobs_from_page(
         self,
-        page: PageContent,
+        page: PageDocument,
     ) -> list[RawJobRecord]:
         """
         Build AI input from a collected page and extract jobs.
@@ -653,7 +653,7 @@ def _source_name_from_url(
 
 
 def _optional_metadata_string(
-    page: PageContent,
+    page: PageDocument,
     key: str,
 ) -> str | None:
     """

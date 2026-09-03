@@ -1,11 +1,11 @@
-"""Mock page collection tool for local agent testing."""
+"""Mock page acquisition tool for local agent testing."""
 
 from typing import Any
 
 from pydantic import BaseModel
 
 from job_radar.tools.web_search.models import CandidateSource
-from job_radar.tools.page_collection.models import PageContent, PageFetchEvidence
+from job_radar.tools.page_acquisition.models import PageDocument, PageFetchEvidence
 from job_radar.tools.base import BaseTool
 
 
@@ -65,14 +65,14 @@ is_official: true
 class MockPageTool(BaseTool):
     """Return deterministic page text without network access."""
 
-    name = "collect_page"
+    name = "acquire_page"
 
-    def run(self, payload: BaseModel | dict[str, Any]) -> PageContent:
+    def run(self, payload: BaseModel | dict[str, Any]) -> PageDocument:
         """Collect mock page content for a selected candidate source."""
 
         source = payload if isinstance(payload, CandidateSource) else CandidateSource.model_validate(payload)
         text = MOCK_PAGES.get(source.url, "")
-        return PageContent(
+        return PageDocument(
             url=source.url,
             source_name=source.source_name,
             title=source.title,

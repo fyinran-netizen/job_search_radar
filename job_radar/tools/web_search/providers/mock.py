@@ -17,7 +17,7 @@ class MockWebSearchTool(BaseTool):
         """Return mock candidate sources for a search plan."""
 
         plan = payload if isinstance(payload, SearchPlan) else SearchPlan.model_validate(payload)
-        keyword_hint = ", ".join(plan.keywords[:3])
+        keyword_hint = ", ".join(plan.queries[:3])
         return [
             CandidateSource(
                 url="mock://future-bank/campus",

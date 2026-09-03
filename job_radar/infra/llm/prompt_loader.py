@@ -8,12 +8,10 @@ from job_radar.infra.paths import PROJECT_ROOT
 
 DEVELOPMENT_SKILLS_DIR = PROJECT_ROOT / ".agents" / "skills"
 RUNTIME_PROMPTS: dict[str, Path] = {
-    "search-strategy": PROJECT_ROOT / "job_radar" / "tools" / "web_search" / "prompts" / "search_strategy.md",
-    "source-selection": PROJECT_ROOT / "job_radar" / "tools" / "web_search" / "prompts" / "source_selection.md",
     "page-jd-classification": PROJECT_ROOT
     / "job_radar"
     / "tools"
-    / "page_processing"
+    / "page_analysis"
     / "prompts"
     / "semantic_classification.md",
     "job-extraction": PROJECT_ROOT / "job_radar" / "tools" / "job_extraction" / "prompts" / "extraction.md",

@@ -8,7 +8,7 @@ from job_radar.tools.job_extraction.models import (
     RawJobRecord,
 )
 
-from job_radar.tools.page_processing.models import (
+from job_radar.tools.page_analysis.models import (
     PendingFollowup,
 )
 

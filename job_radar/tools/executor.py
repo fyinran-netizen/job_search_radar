@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from job_radar.infra.logging import get_logger
-from job_radar.tools.page_collection.models import ToolEvent
+from job_radar.tools.page_acquisition.models import ToolEvent
 from job_radar.tools.base import BaseTool
 
 
@@ -69,6 +69,10 @@ class ToolExecutor:
         if callable(summary):
             return str(summary())
         if isinstance(value, BaseModel):
+            fetch_evidence = getattr(value, "fetch_evidence", None)
+            fetch_method = getattr(fetch_evidence, "fetch_method", None)
+            if fetch_method:
+                return f"{value.__class__.__name__}(acquisition_method={fetch_method})"
             return value.__class__.__name__
         if isinstance(value, dict):
             return f"dict[{', '.join(sorted(value.keys()))}]"

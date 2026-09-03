@@ -18,7 +18,7 @@ The current code should be viewed as the first working slice of that target syst
 ```mermaid
 flowchart TD
     Profile[UserProfile YAML] --> Check[profile/completeness ProfileCompletenessChecker]
-    Check --> Plan[ai/tasks AutoSearchPlanBuilder or SearchPlanBuilder]
+    Check --> Plan[build_search_plan SearchPlanBuilder]
     Plan --> Executor[ToolExecutor]
     Executor --> Search[tools/functions MockWebSearchTool]
     Search --> Sources[CandidateSource URLs]
@@ -26,7 +26,7 @@ flowchart TD
     ManualSources[Configured manual URLs] --> ManualTool[tools/functions ManualSourceTool]
     ManualTool --> HttpPageTool[tools/functions HttpPageTool]
     HttpPageTool --> Pages
-    PageTool --> Pages[PageContent]
+    PageTool --> Pages[PageDocument]
     Pages --> Extract[JobExtractor]
     Extract -. future .-> LLMExtract[LLMJobExtractor + LLMClient]
     Extract --> Agent[agent/orchestrator JobDiscoveryAgent]
@@ -64,7 +64,7 @@ AI returns CandidateProfile
 
 AI returns ToolPlan
 -> Program checks allowed tools, domains, budgets, and privacy rules
--> ToolExecutor runs web_search or collect_page
+-> ToolExecutor runs web_search or acquire_page
 
 AI returns MatchAssessment
 -> Program validates score/reasons
@@ -78,10 +78,10 @@ AI returns MatchAssessment
 | User input and file handling | Upload resume, parse PDF/DOCX, accept free-form preferences. | Not implemented. Current profile comes from YAML. |
 | User profile extraction | AI extracts `CandidateProfile` from resume and text. | Not implemented. `UserProfile` is loaded from YAML. |
 | Profile completeness | Program checks required fields before search strategy generation. | Deterministic `ProfileCompletenessChecker` checks required fields outside AI tasks. |
-| Search strategy | AI generates role groups, queries, source priorities, stop conditions. | Streamlit mock-agent runs can use local Codex CLI through `AutoSearchPlanBuilder`; deterministic `SearchPlanBuilder` remains the fallback. |
+| Search strategy | Deterministic `build_search_plan` generates bounded role-led queries. | A future builder may implement the shared Protocol without changing the Agent Tool boundary. |
 | Tool planning | AI returns a validated `ToolPlan`. | Not implemented. Current executor is called in fixed order. |
 | Search tools | `web_search`, company career search, API/MCP tools. | `MockWebSearchTool` and `ManualSourceTool`. |
-| Page collection | Fetch URL, browser/site adapter if needed, return `PageContent`. | `MockPageTool` and `HttpPageTool`. |
+| Page acquisition | Fetch URL, browser/site adapter if needed, return `PageDocument`. | `MockPageTool` and `HttpPageTool`. |
 | Job extraction | Prefer LLM extraction for varied pages, then validate. | `RuleBasedJobExtractor`; `LLMJobExtractor` boundary exists for later. |
 | Validation/normalization/dedup | Deterministic quality gate. | Implemented in `pipeline/`. |
 | Job understanding | AI identifies hard requirements, eligibility, risks. | Not implemented. |
@@ -123,9 +123,9 @@ The current agent implementation is a local skeleton for the SVG's agent/tool ph
 
 ```text
 ProfileCompletenessChecker
--> AutoSearchPlanBuilder/SearchPlanBuilder
+-> build_search_plan/SearchPlanBuilder
 -> ToolExecutor web_search
--> ToolExecutor collect_page
+-> ToolExecutor acquire_page
 -> RuleBasedJobExtractor
 -> existing PipelineRunner
 ```
@@ -134,7 +134,7 @@ The manual URL path runs:
 
 ```text
 ManualSourceTool configured URLs
--> ToolExecutor collect_page
+-> ToolExecutor acquire_page
 -> HttpPageTool
 -> RuleBasedJobExtractor
 -> existing PipelineRunner
@@ -150,7 +150,7 @@ CandidateProfileDecision
 -> SearchStrategy
 -> ToolPlan
 -> RawSearchResult[]
--> PageContent
+-> PageDocument
 -> ExtractedJob[]
 -> JobUnderstanding
 -> MatchAssessment
@@ -161,7 +161,7 @@ Each AI-produced item should be a Pydantic model. AI may propose values, but cod
 
 ## Adding Real Tools Later
 
-A real tool should implement the `BaseTool` boundary and return structured models such as `CandidateSource`, `PageContent`, or `RawJobRecord`. It should preserve `apply_url`, `source_url`, `source_name`, and `is_official` so downstream validation and persistence can keep source traceability.
+A real tool should implement the `BaseTool` boundary and return structured models such as `CandidateSource`, `PageDocument`, or `RawJobRecord`. It should preserve `apply_url`, `source_url`, `source_name`, and `is_official` so downstream validation and persistence can keep source traceability.
 
 Future tools can be added for company career sites, official campus recruitment pages, or imported files. They should not write directly to SQLite and should not bypass validation.
 

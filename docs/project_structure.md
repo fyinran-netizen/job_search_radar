@@ -5,8 +5,6 @@ job_search_radar/
 |-- .agents/
 |   `-- skills/
 |       |-- profile-builder/
-|       |-- search-strategy/
-|       |-- source-selection/
 |       |-- job-extraction/
 |       |-- job-understanding/
 |       |-- match-analysis/
@@ -93,7 +91,7 @@ job_search_radar/
 |   |       |-- job_semantics.py
 |   |       |-- manual_sources.py
 |   |       |-- mock_page.py
-|   |       |-- page_processing.py
+|   |       |-- page_analysis.py
 |   |       `-- mock_web_search.py
 |   `-- utils/
 |       |-- __init__.py
@@ -112,7 +110,7 @@ job_search_radar/
 
 `.agents/skills/` contains Codex-style skill instructions. These files define how AI should think and what JSON it should return. They are prompt assets, not Python business logic.
 
-`job_radar/ai/tasks/` contains AI-facing business tasks such as search strategy generation. `AutoSearchPlanBuilder` can use the local Codex CLI when the user is logged in, with deterministic fallback. Future Codex-backed tasks should live here, not under `tools/`.
+`job_radar/tools/search_plan/` contains the deterministic `build_search_plan` Agent Tool and shared `SearchPlanBuilderProtocol`. Future optional builders can implement the Protocol without changing the tool or provider boundaries.
 
 `job_radar/profile/` contains deterministic profile checks. Profile completeness is a Python required-field gate, not an AI decision.
 
@@ -120,9 +118,9 @@ job_search_radar/
 
 `job_radar/agent/` owns workflow control: orchestration, state, transitions, limits, and guardrails. It decides when to call tasks, tools, and extractors, but it does not fetch pages directly or write to storage.
 
-`job_radar/tools/` contains executable actions. `tools/functions/` holds deterministic Python tools such as manual source loading, mock search, mock page collection, HTTP page fetching, page routing tools, and job semantic tools. `ToolExecutor` executes tools and records tool events.
+`job_radar/tools/` contains executable actions. Page acquisition owns manual source loading, mock/HTTP/browser fetching, JS-shell detection, recovery, and technical triage. Page analysis owns cleaning, quality checks, and semantic classification. `ToolExecutor` executes tools and records tool events.
 
-`job_radar/extractors/` owns the boundary from `PageContent` to `RawJobRecord`. `RuleBasedJobExtractor` is the current implementation and fallback. `LLMJobExtractor` is the adapter for future AI-backed extraction.
+`job_radar/extractors/` owns the boundary from `PageDocument` to `RawJobRecord`. `RuleBasedJobExtractor` is the current implementation and fallback. `LLMJobExtractor` is the adapter for future AI-backed extraction.
 
 `job_radar/pipeline/` contains deterministic data processing only: validation, normalization, deduplication, matching, and runner orchestration. It does not call Codex, web search, or Streamlit.
 

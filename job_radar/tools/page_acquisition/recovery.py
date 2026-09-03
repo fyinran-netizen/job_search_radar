@@ -6,8 +6,8 @@ from html import unescape
 from html.parser import HTMLParser
 from typing import Any
 
-from job_radar.tools.page_collection.models import PageContent
-from job_radar.tools.page_processing.models import (
+from job_radar.tools.page_acquisition.models import PageDocument
+from job_radar.tools.page_acquisition.models import (
     PageRecoveryResult,
     RecoverySource,
 )
@@ -111,10 +111,10 @@ class _MetadataParser(HTMLParser):
 
 
 def recover_page(
-    page: PageContent,
+    page: PageDocument,
     available_sources: list[RecoverySource],
     min_recovered_chars: int = MIN_RECOVERED_CHARS,
-) -> tuple[PageContent, PageRecoveryResult]:
+) -> tuple[PageDocument, PageRecoveryResult]:
     """Try deterministic same-page recovery and return an updated page."""
 
     parser = _parse_metadata(page.html or "")
@@ -218,7 +218,7 @@ def recover_page(
 
 def _recover_from_source(
     source: RecoverySource,
-    page: PageContent,
+    page: PageDocument,
     parser: _MetadataParser,
 ) -> str:
     if source == "json_ld":

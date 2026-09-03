@@ -45,6 +45,10 @@ class JobUnderstandingTool(BaseTool):
 
     def run(self, payload: BaseModel | dict[str, Any]) -> JobUnderstandingToolOutput:
         data = payload if isinstance(payload, JobUnderstandingToolInput) else JobUnderstandingToolInput.model_validate(payload)
+        logger.info(
+            "job_understanding_provider_start provider=%s model=%s job_count=%s timeout_seconds=%s",
+            self.provider.__class__.__name__, self.provider.model, len(data.jobs), self.timeout_seconds,
+        )
         analyzer = JobUnderstandingAnalyzer(self.provider, timeout_seconds=self.timeout_seconds)
         records: list[JobUnderstandingRecord] = []
         errors = []
@@ -82,5 +86,9 @@ class JobUnderstandingTool(BaseTool):
             len(records),
             skipped_count,
             len(errors),
+        )
+        logger.info(
+            "job_understanding_provider_complete provider=%s model=%s understood=%s errors=%s",
+            self.provider.__class__.__name__, self.provider.model, len(records), len(errors),
         )
         return JobUnderstandingToolOutput(records=records, report=report)

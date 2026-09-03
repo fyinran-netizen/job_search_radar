@@ -20,8 +20,8 @@ from job_radar.infra.llm.ollama import OllamaProvider
 from job_radar.tools.job_extraction.extraction import AIJobExtractionClient
 from job_radar.tools.job_extraction.models import AIPageInput
 from job_radar.tools.job_extraction.models import RawJobRecord
-from job_radar.tools.page_processing.models import PendingFollowup
-from job_radar.tools.page_collection.models import PageContent
+from job_radar.tools.page_analysis.models import PendingFollowup
+from job_radar.tools.page_acquisition.models import PageDocument
 from job_radar.tools.job_extraction.normalization import deduplicate_records, normalize_records
 from job_radar.tools.job_extraction.validation import validate_records
 from job_radar.tools.job_extraction.quality import triage_extracted_page
@@ -178,10 +178,10 @@ def _load_cleaned_pages(path: str) -> list[AIPageInput]:
 
 
 def _load_prior_pending_followups(run_dir: Path) -> list[PendingFollowup]:
-    collection_report = run_dir / "page_collection_report.json"
-    if collection_report.exists():
+    acquisition_report = run_dir / "page_acquisition_report.json"
+    if acquisition_report.exists():
         try:
-            payload = json.loads(collection_report.read_text(encoding="utf-8-sig"))
+            payload = json.loads(acquisition_report.read_text(encoding="utf-8-sig"))
             return TypeAdapter(list[PendingFollowup]).validate_python(payload.get("pending_followups", []))
         except (OSError, json.JSONDecodeError, ValidationError):
             return []
@@ -410,8 +410,8 @@ def _backfill_batch_records(records: list[RawJobRecord], page_inputs: list[AIPag
     return backfilled
 
 
-def _page_input_to_page_content(page_input: AIPageInput) -> PageContent:
-    return PageContent(
+def _page_input_to_page_content(page_input: AIPageInput) -> PageDocument:
+    return PageDocument(
         url=page_input.url,
         source_name=_infer_source_name(page_input),
         title=page_input.title,

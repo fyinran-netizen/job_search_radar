@@ -28,7 +28,7 @@ class RuntimeSettings:
     """Resolved runtime settings for model-backed Job Radar workflows."""
 
     ollama_base_url: str
-    page_processing: LLMTaskSettings
+    analyze_page: LLMTaskSettings
     extraction: LLMTaskSettings
     understanding: LLMTaskSettings
     match: LLMTaskSettings
@@ -62,16 +62,16 @@ def load_runtime_settings() -> RuntimeSettings:
 
     return RuntimeSettings(
         ollama_base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
-        page_processing=LLMTaskSettings(
+        analyze_page=LLMTaskSettings(
             provider=os.environ.get(
-                "JOB_RADAR_PAGE_PROCESSING_PROVIDER",
+                "JOB_RADAR_PAGE_ANALYSIS_PROVIDER",
                 "ollama",
             ),
             model=os.environ.get(
-                "JOB_RADAR_PAGE_PROCESSING_MODEL",
+                "JOB_RADAR_PAGE_ANALYSIS_MODEL",
                 "gpt-oss:20b-cloud",
             ),
-            timeout_seconds=_env_int("JOB_RADAR_PAGE_PROCESSING_TIMEOUT_SECONDS", 90),
+            timeout_seconds=_env_int("JOB_RADAR_PAGE_ANALYSIS_TIMEOUT_SECONDS", 90),
         ),
         extraction=LLMTaskSettings(
             provider=os.environ.get("JOB_RADAR_EXTRACTION_PROVIDER", "ollama"),

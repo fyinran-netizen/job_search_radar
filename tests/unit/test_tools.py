@@ -1,4 +1,4 @@
-﻿import json
+import json
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
@@ -14,18 +14,20 @@ from job_radar.tools.job_extraction.extraction import (
     extract_important_links,
 )
 from job_radar.tools.job_extraction.models import ImportantLink
-from job_radar.tools.page_processing.semantic_classification import PageSemanticClassifier
+from job_radar.tools.page_analysis.semantic_classification import PageSemanticClassifier
 from job_radar.tools.job_understanding.analyzer import JobUnderstandingAnalyzer
 from job_radar.tools.match_analysis.analyzer import SemanticMatchAnalyzer
-from job_radar.tools.web_search.search_strategy import AISearchPlanBuilder, AutoSearchPlanBuilder, SearchPlanBuilder
+from job_radar.tools.search_plan import SearchPlanBuilder
+from job_radar.tools.search_plan import BuildSearchPlanTool, SearchPlanToolInput
+from job_radar.tools.web_search.source_selection import normalize_url, select_sources
 from job_radar.config import load_matching_rules, load_profile
 from job_radar.tools.job_extraction.models import RawJobRecord
 from job_radar.tools.web_search.models import CandidateSource, SearchPlan
 from job_radar.tools.web_search.config import load_candidate_sources
 from job_radar.profile.models import UserProfile
-from job_radar.tools.page_collection.models import PageContent
-from job_radar.tools.page_processing.cleaning import clean_page_text
-from job_radar.tools.page_processing.technical_triage import triage_pages
+from job_radar.tools.page_acquisition.models import PageDocument
+from job_radar.tools.page_analysis.cleaning import clean_page_text
+from job_radar.tools.page_acquisition.technical_triage import triage_pages
 from job_radar.tools.job_extraction.quality import triage_extracted_page
 from job_radar.tools.match_analysis.basic_gate import evaluate_basic_gate
 from job_radar.tools.match_analysis.deterministic import evaluate_deterministic_match
@@ -86,7 +88,7 @@ def test_profile_checker_requires_graduation_year() -> None:
     assert result.missing_fields == ["graduation_date"]
 
 
-def test_search_plan_builder_generates_keywords() -> None:
+def test_search_plan_builder_generates_role_led_queries() -> None:
     profile = UserProfile(
         graduation_date="2026-06",
         target_roles=["Data Analyst"],
@@ -101,9 +103,9 @@ def test_search_plan_builder_generates_keywords() -> None:
     assert plan.graduation_start == "2025-09"
     assert plan.graduation_end == "2026-06"
     assert "2026届" in plan.cohort_terms
-    assert "Data Analyst 2026 graduate" in plan.keywords
-    assert "2026 graduate jobs Shanghai" in plan.keywords
-    assert "Bank 2026 graduate program" in plan.keywords
+    assert plan.queries
+    assert all("Data Analyst" in query for query in plan.queries)
+    assert all(token in plan.queries[0] for token in ("Shanghai", "Bank"))
 
 
 def test_search_plan_builder_maps_september_to_next_cohort() -> None:
@@ -121,73 +123,29 @@ def test_search_plan_builder_maps_september_to_next_cohort() -> None:
     assert plan.graduation_start == "2026-09"
     assert plan.graduation_end == "2027-06"
     assert "2027届" in plan.cohort_terms
-    assert "Software Engineer 2027 graduate" in plan.keywords
+    assert "Software Engineer" in plan.queries[0]
 
 
-def test_ai_search_plan_builder_uses_skill_provider() -> None:
-    profile, _, _ = load_profile(CONFIG_DIR)
-    provider = MockAIProvider(
-        {
-            "target_roles": ["Data Analyst"],
-            "locations": ["Sydney"],
-            "company_types": ["Technology"],
-            "keywords": ["Data Analyst graduate 2026 Sydney"],
-        }
-    )
-
-    plan = AISearchPlanBuilder(provider).build(profile)
-
-    assert plan.keywords == ["Data Analyst graduate 2026 Sydney"]
-    assert provider.prompts
-    assert "Search Strategy" in provider.prompts[0]
-
-
-def test_auto_search_plan_builder_falls_back_when_codex_unavailable() -> None:
-    class UnavailableCodexProvider:
-        def is_available(self) -> bool:
-            return False
-
-        def generate_json(self, _prompt):
-            raise AssertionError("Codex should not be called when unavailable")
-
+def test_search_plan_tool_generates_distinct_role_led_round_queries() -> None:
     profile = UserProfile(
-        graduation_date="2026-06",
-        target_roles=["Data Analyst"],
-        skills=["Python"],
-        preferred_locations=["Shanghai"],
-        preferred_company_types=["Bank"],
+        graduation_date="2026-06", target_roles=["Data Analyst"],
+        preferred_locations=["Sydney"], preferred_company_types=["Bank"],
     )
-    builder = AutoSearchPlanBuilder(codex_provider=UnavailableCodexProvider())  # type: ignore[arg-type]
+    tool = BuildSearchPlanTool()
+    first = tool.run(SearchPlanToolInput(profile=profile, round_index=0))
+    second = tool.run(SearchPlanToolInput(profile=profile, round_index=1, previous_queries=first.queries))
+    assert first.queries and second.queries
+    assert set(first.queries).isdisjoint(second.queries)
+    assert all("Data Analyst" in query and "Sydney" in query and "Bank" in query for query in first.queries)
 
-    plan = builder.build(profile)
 
-    assert builder.last_source == "deterministic"
-    assert "not installed or not authenticated" in (builder.last_error or "")
-    assert "Data Analyst 2026 graduate" in plan.keywords
-
-
-def test_auto_search_plan_builder_falls_back_when_codex_output_fails() -> None:
-    class FailingCodexProvider:
-        def is_available(self) -> bool:
-            return True
-
-        def generate_json(self, _prompt):
-            raise RuntimeError("bad codex output")
-
-    profile = UserProfile(
-        graduation_date="2026-06",
-        target_roles=["Data Analyst"],
-        skills=["Python"],
-        preferred_locations=["Shanghai"],
-        preferred_company_types=["Bank"],
+def test_source_selection_normalizes_and_deduplicates_urls_across_rounds() -> None:
+    source = CandidateSource(
+        url="https://Careers.Example/job/1/?utm_source=test#top", title="Role",
+        source_name="Example", is_official=True, relevance_score=90,
     )
-    builder = AutoSearchPlanBuilder(codex_provider=FailingCodexProvider())  # type: ignore[arg-type]
-
-    plan = builder.build(profile)
-
-    assert builder.last_source == "deterministic"
-    assert builder.last_error == "bad codex output"
-    assert "Data Analyst 2026 graduate" in plan.keywords
+    assert normalize_url(source.url) == "https://careers.example/job/1"
+    assert select_sources([source], previous_urls={"https://careers.example/job/1"}) == []
 
 
 def test_codex_provider_uses_utf8_for_prompt(monkeypatch) -> None:
@@ -489,7 +447,7 @@ def test_load_candidate_sources_reads_enabled_manual_source() -> None:
 
 
 def test_page_filter_accepts_job_like_page() -> None:
-    page = PageContent(
+    page = PageDocument(
         url="https://careers.example/job/123",
         source_name="Example Careers",
         title="Data Analyst Graduate 2026",
@@ -508,7 +466,7 @@ def test_page_filter_accepts_job_like_page() -> None:
 
 
 def test_page_filter_rejects_obvious_non_job_page() -> None:
-    page = PageContent(
+    page = PageDocument(
         url="https://careers.example/login",
         source_name="Example Careers",
         title="Login",
@@ -524,7 +482,7 @@ def test_page_filter_rejects_obvious_non_job_page() -> None:
 
 
 def test_page_filter_does_not_reject_job_page_for_nav_login_words() -> None:
-    page = PageContent(
+    page = PageDocument(
         url="https://www.boc.cn/aboutboc/bi4/202603/t20260311_25654053.html",
         source_name="Bank of China",
         title="Bank of China 2026 Spring Recruitment Notice",
@@ -543,7 +501,7 @@ def test_page_filter_does_not_reject_job_page_for_nav_login_words() -> None:
 
 
 def test_page_filter_keeps_redirected_detail_to_listing_page() -> None:
-    page = PageContent(
+    page = PageDocument(
         url="https://group.bnpparibas/en/careers/job-offer/bnp-paribas-sydney-2026-graduate-programme",
         source_name="BNP Paribas Careers",
         title="Job offers for the job function Finance accounts and management control - BNP Paribas",
@@ -570,7 +528,7 @@ def test_page_filter_keeps_redirected_detail_to_listing_page() -> None:
 
 
 def test_page_filter_marks_short_collectable_page_pending() -> None:
-    page = PageContent(
+    page = PageDocument(
         url="https://job.xiaohongshu.com/campus/position/17071",
         source_name="Xiaohongshu Campus Careers",
         title="Xiaohongshu",
@@ -586,7 +544,7 @@ def test_page_filter_marks_short_collectable_page_pending() -> None:
 
 
 def test_page_filter_rejects_redirected_error_page() -> None:
-    page = PageContent(
+    page = PageDocument(
         url="https://job-boards.greenhouse.io/letsgetchecked/jobs/4833407101",
         source_name="LetsGetChecked Greenhouse",
         title="Jobs at LetsGetChecked",
@@ -700,7 +658,7 @@ def test_extraction_triage_marks_small_sparse_role_list_pending() -> None:
 
 
 def test_build_ai_page_input_preserves_provenance_but_drops_search_scoring() -> None:
-    page = PageContent(
+    page = PageDocument(
         url="https://careers.example/job/123",
         source_name="Example Careers",
         title="Data Analyst Graduate",
@@ -744,7 +702,7 @@ def test_build_ai_page_input_preserves_provenance_but_drops_search_scoring() -> 
 
 
 def test_extract_important_links_keeps_attachments_and_apply_links() -> None:
-    page = PageContent(
+    page = PageDocument(
         url="https://www.boc.cn/aboutboc/bi4/202603/t20260311_25654053.html",
         source_name="Bank of China",
         title="Bank of China 2026 Spring Recruitment Notice",
@@ -768,7 +726,7 @@ def test_extract_important_links_keeps_attachments_and_apply_links() -> None:
 
 
 def test_extract_important_links_uses_visible_apply_url_and_rejects_misleading_path() -> None:
-    page = PageContent(
+    page = PageDocument(
         url="https://www.boc.cn/recruitment",
         source_name="Bank of China",
         title="Spring recruitment",
@@ -824,7 +782,7 @@ def test_clean_page_text_prefers_trafilatura_html() -> None:
 
 
 def test_ai_job_extraction_client_prompts_with_minimal_page_input() -> None:
-    page = PageContent(
+    page = PageDocument(
         url="https://careers.example/job/123",
         source_name="Example Careers",
         title="Data Analyst Graduate",
@@ -894,7 +852,7 @@ def test_ai_job_extraction_falls_back_to_source_location_after_semantic_response
             "jobs": [{"title": "Software Engineer Graduate", "location": None}],
         }
     )
-    page = PageContent(
+    page = PageDocument(
         url="https://careers.example/job/1",
         source_name="Example Careers",
         title="Software Engineer Graduate - Shanghai",

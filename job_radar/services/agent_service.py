@@ -14,7 +14,9 @@ from job_radar.agent.models import AgentLimits, AgentState
 from job_radar.infra.paths import DEFAULT_DB_PATH
 from job_radar.profile.models import UserProfile
 from job_radar.tools.executor import ToolExecutor
-from job_radar.tools.web_search.search_strategy import SearchPlanBuilder
+from job_radar.infra.logging import configure_logging, get_logger, new_run_id
+
+logger = get_logger(__name__)
 
 
 class DecisionTraceEntry(BaseModel):
@@ -52,11 +54,10 @@ class AgentService:
         """Run until the injected controller selects ``stop``."""
 
         state = initial_state or AgentState()
-        if state.search_plan is None:
-            state = state.model_copy(update={"search_plan": SearchPlanBuilder().build(profile)})
-
+        run_id = configure_logging(new_run_id())
+        logger.info("agent_run_start run_id=%s", run_id)
         trace: list[DecisionTraceEntry] = []
-        step_limit = self.max_steps or (self.limits.max_rounds * 7 + 1)
+        step_limit = self.max_steps or self.limits.max_steps
 
         for step in range(1, step_limit + 1):
             context = DecisionContext(
@@ -65,6 +66,10 @@ class AgentService:
                 profile=profile,
             )
             action = self.controller.decide(context)
+            logger.info(
+                "agent_decision run_id=%s step=%s round_index=%s action=%s",
+                run_id, step, state.round_index, action.action,
+            )
             trace.append(
                 DecisionTraceEntry(
                     step=step,
@@ -77,6 +82,7 @@ class AgentService:
 
             if action.action == "stop":
                 state = execute_action(action, state, self.executor, self.limits, profile=profile)
+                logger.info("agent_stop run_id=%s round_index=%s stop_reason=%s", run_id, state.round_index, state.stop_reason)
                 return AgentServiceResult(state=state, decision_trace=trace)
 
             next_state = execute_action(action, state, self.executor, self.limits, profile=profile)
@@ -86,7 +92,9 @@ class AgentService:
                 )
             state = next_state
 
-        raise RuntimeError(f"Agent loop exceeded its bounded step limit ({step_limit})")
+        state = state.model_copy(update={"stop_reason": "max_steps reached"})
+        logger.info("agent_stop run_id=%s round_index=%s stop_reason=max_steps reached", run_id, state.round_index)
+        return AgentServiceResult(state=state, decision_trace=trace)
 
     @staticmethod
     def _state_summary(state: AgentState) -> dict[str, Any]:
@@ -95,8 +103,8 @@ class AgentService:
             "stop_reason": state.stop_reason,
             "candidate_sources": len(state.candidate_sources),
             "selected_sources": len(state.selected_sources),
-            "collected_pages": len(state.collected_pages),
-            "processed_pages": len(state.processed_pages),
+            "acquired_pages": len(state.acquired_pages),
+            "job_detail_pages": len(state.job_detail_pages),
             "prepared_jobs": len(state.prepared_jobs),
             "understanding_records": len(state.understanding_records),
             "match_assessments": len(state.match_assessments),

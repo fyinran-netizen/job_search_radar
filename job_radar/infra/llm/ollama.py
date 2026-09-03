@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from time import perf_counter
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
@@ -10,6 +11,9 @@ from urllib.request import Request, urlopen
 
 from job_radar.infra.llm.base import AIProvider
 from job_radar.infra.llm.structured_output import StructuredOutputError, parse_json_output
+from job_radar.infra.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class OllamaError(RuntimeError):
@@ -71,10 +75,15 @@ class OllamaProvider(AIProvider):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        started = perf_counter()
+        endpoint = urljoin(self.base_url, "api/chat")
+        logger.info("llm_request_start provider=ollama model=%s endpoint=%s timeout_seconds=%s", self.model, endpoint, timeout_seconds)
         try:
             with urlopen(request, timeout=timeout_seconds) as response:
                 response_payload = json.loads(response.read().decode("utf-8"))
+            logger.info("llm_request_complete provider=ollama model=%s elapsed_ms=%.1f response_connection=closed", self.model, (perf_counter() - started) * 1000)
         except (OSError, HTTPError, URLError, json.JSONDecodeError) as exc:
+            logger.exception("llm_request_failed provider=ollama model=%s elapsed_ms=%.1f", self.model, (perf_counter() - started) * 1000)
             raise OllamaError(f"Ollama request failed: {exc}") from exc
 
         message = response_payload.get("message")

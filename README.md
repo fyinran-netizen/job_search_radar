@@ -16,9 +16,9 @@ Profile -> Agent Controller -> ToolExecutor -> Page/Job Tools
 - Bounded agent loop with validated `AgentState`, explicit `AgentLimits`, action transitions, and decision tracing.
 - Deterministic `RuleBasedController` for the current baseline, with an `LLMController` boundary available for structured decisions.
 - Deterministic profile completeness checks before search planning.
-- Mock web search and mock page collection for network-free development and tests.
-- Optional Tavily web search and Python HTTP page collection for explicitly configured real searches.
-- Page processing in two stages: deterministic technical triage/cleaning, followed by optional semantic classification.
+- Mock web search and mock page acquisition for network-free development and tests.
+- Optional Tavily web search and Python HTTP page acquisition for explicitly configured real searches.
+- Page handling in two stages: acquisition performs fetch/recovery, then analysis performs cleaning, quality checks, and semantic classification.
 - Structured job extraction, job understanding, and match analysis tools with Pydantic validation and deterministic fallbacks.
 - Recoverable handling for invalid records, rejected pages, and pending follow-ups; one bad item does not fail the whole run.
 - SQLite persistence with duplicate protection and preservation of user-managed status and notes.
@@ -43,8 +43,8 @@ The mock path must remain deterministic and must not call a real LLM API or make
 `job_radar/tools/` contains callable capabilities registered with `ToolExecutor`:
 
 - `web_search/`: search plans, source selection, mock provider, and optional Tavily provider.
-- `page_collection/`: mock, HTTP, and browser page collection models/tools.
-- `page_processing/`: page cleaning, technical triage, recovery, and semantic routing.
+- `page_acquisition/`: mock, HTTP, browser fallback, JS-shell detection, embedded JSON recovery, and acquisition triage.
+- `page_analysis/`: content cleaning, quality checks, and semantic classification; it never accesses the network.
 - `job_extraction/`: raw/job models, extraction, validation, normalization, and quality checks.
 - `job_understanding/`: structured job requirement analysis.
 - `match_analysis/`: basic gates, deterministic scoring, and optional semantic matching.
@@ -71,8 +71,9 @@ Profile completeness gate
 -> SearchPlan
 -> web_search
 -> bounded source selection
--> collect_page
--> technical page triage and cleaning
+-> acquire_page
+-> page acquisition and recovery
+-> page analysis: cleaning, quality checks, semantic classification
 -> semantic page routing
 -> job extraction
 -> job understanding
@@ -93,7 +94,7 @@ job_radar/frontend/       Streamlit UI and view models
 job_radar/infra/          HTTP, LLM, logging, paths, runtime, and SQLite
 job_radar/profile/        User profile models and completeness checks
 job_radar/services/       Application-level orchestration
-job_radar/tools/          Registered search, collection, processing, and analysis tools
+job_radar/tools/          Registered search, acquisition, analysis, and extraction tools
 tests/                    Unit, integration, smoke, fixtures, and test doubles
 ```
 
@@ -133,9 +134,8 @@ The app initializes `data/jobs.db` on first use. The profile form runs the bound
 The CLI commands can be run independently against JSON artifacts in a temporary directory:
 
 ```powershell
-.\scripts\uv-local.ps1 run python -m job_radar.cli.search_strategy --provider codex --show-meta
 .\scripts\uv-local.ps1 run python -m job_radar.cli.web_search --provider mock --plan-file .test_tmp/search_plan.json --max-sources 5
-.\scripts\uv-local.ps1 run python -m job_radar.cli.collect_pages --sources-file .test_tmp/candidate_sources.json --output-run-dir .test_tmp/page_run
+.\scripts\uv-local.ps1 run python -m job_radar.cli.acquire_pages --sources-file .test_tmp/candidate_sources.json --output-run-dir .test_tmp/page_run
 .\scripts\uv-local.ps1 run python -m job_radar.cli.clean_pages --pages-file .test_tmp/page_run/readable_pages.json --output-file .test_tmp/page_run/cleaned_pages.json
 .\scripts\uv-local.ps1 run python -m job_radar.cli.classify_pages --cleaned-pages-file .test_tmp/page_run/cleaned_pages.json --output-jd-cleaned-pages-file .test_tmp/page_run/jd_cleaned_pages.json
 .\scripts\uv-local.ps1 run python -m job_radar.cli.extract_jobs --cleaned-pages-file .test_tmp/page_run/jd_cleaned_pages.json --output-run-dir .test_tmp/page_run

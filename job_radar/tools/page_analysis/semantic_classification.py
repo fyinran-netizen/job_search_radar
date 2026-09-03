@@ -1,4 +1,4 @@
-"""AI semantic classification after deterministic page processing."""
+"""AI semantic classification after deterministic page analysis."""
 
 from typing import Literal
 
@@ -9,7 +9,7 @@ from job_radar.infra.llm.prompt_builder import build_json_prompt
 from job_radar.infra.llm.prompt_loader import load_skill
 from job_radar.infra.llm.structured_output import validate_model
 from job_radar.tools.job_extraction.models import AIPageInput
-from job_radar.tools.page_processing.models import (
+from job_radar.tools.page_analysis.models import (
     PageSemanticType,
     PendingFollowup,
     SuggestedNextAction,

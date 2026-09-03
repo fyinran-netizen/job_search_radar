@@ -1,5 +1,5 @@
 {
   "reason_code": "auth_wall",
-  "stage": "page_processing",
+  "stage": "analyze_page",
   "expected_readable": false
 }

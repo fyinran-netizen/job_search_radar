@@ -25,6 +25,7 @@ def test_agent_service_runs_injected_rule_controller_and_records_trace() -> None
     assert result.state.stop_reason == "deterministic stop condition reached"
     assert [entry.selected_action for entry in result.decision_trace] == [
         "web_search",
+        "acquire_page",
         "stop",
     ]
     assert result.decision_trace[0].available_actions == ["web_search"]

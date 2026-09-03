@@ -1,14 +1,14 @@
-﻿from job_radar.agent.actions import AgentAction, available_actions, execute_action
+from job_radar.agent.actions import AgentAction, available_actions, execute_action
 from job_radar.agent.models import AgentLimits, AgentState
 from tests.doubles.mock_ai_provider import MockAIProvider
 from job_radar.profile.models import UserProfile
 from job_radar.tools.job_extraction.tool import JobExtractionTool
 from job_radar.tools.job_understanding.tool import JobUnderstandingTool
 from job_radar.tools.match_analysis.tool import MatchAnalysisTool
-from job_radar.tools.page_processing.tool import PageProcessingTool
+from job_radar.tools.page_analysis.tool import PageAnalysisTool
 from job_radar.tools.registry import create_mock_tool_executor
 from job_radar.tools.web_search.models import SearchPlan
-from job_radar.tools.web_search.search_strategy import SearchPlanBuilder
+from job_radar.tools.search_plan import SearchPlanBuilder
 
 from tests.fixtures.loaders import load_json
 
@@ -34,7 +34,7 @@ def test_mock_agent_action_sequence_updates_state_and_stops() -> None:
     executor = create_mock_tool_executor()
     executor.tools.update(
         {
-            "page_processing": PageProcessingTool(page_provider),
+            "analyze_page": PageAnalysisTool(page_provider),
             "job_extraction": JobExtractionTool(extraction_provider),
             "job_understanding": JobUnderstandingTool(understanding_provider),
             "match_analysis": MatchAnalysisTool(match_provider),
@@ -51,8 +51,8 @@ def test_mock_agent_action_sequence_updates_state_and_stops() -> None:
     decisions: list[dict[str, object]] = []
     selected_actions = [
         ("web_search", "Search the configured mock sources."),
-        ("collect_page", "Collect the selected mock pages."),
-        ("page_processing", "Process collected pages for extraction."),
+        ("acquire_page", "Collect the selected mock pages."),
+        ("analyze_page", "Process collected pages for extraction."),
         ("job_extraction", "Extract structured jobs from accepted pages."),
         ("job_understanding", "Understand requirements for prepared jobs."),
         ("match_analysis", "Assess the prepared jobs against the profile."),
@@ -87,9 +87,9 @@ def test_mock_agent_action_sequence_updates_state_and_stops() -> None:
     assert all(item["rationale"] for item in decisions)
     assert [event.tool_name for event in executor.events] == [
         "web_search",
-        "collect_page",
-        "collect_page",
-        "page_processing",
+        "acquire_page",
+        "acquire_page",
+        "analyze_page",
         "job_extraction",
         "job_understanding",
         "match_analysis",
@@ -100,9 +100,9 @@ def test_mock_agent_action_sequence_updates_state_and_stops() -> None:
     assert [source.url for source in state.candidate_sources] == source_expectations["candidate_urls"]
     assert len(state.selected_sources) == source_expectations["selected_count"]
     assert [source.url for source in state.selected_sources] == source_expectations["selected_urls"]
-    assert len(state.collected_pages) == page_expectations["collected_count"]
-    assert [page.url for page in state.collected_pages] == page_expectations["page_urls"]
-    assert len(state.processed_pages) == page_expectations["collected_count"]
+    assert len(state.acquired_pages) == page_expectations["collected_count"]
+    assert [page.url for page in state.acquired_pages] == page_expectations["page_urls"]
+    assert len(state.job_detail_pages) == page_expectations["collected_count"]
     assert len(state.prepared_jobs) == job_expectations["prepared_count"]
     assert [job.title for job in state.prepared_jobs] == job_expectations["expected_titles"]
     assert len(state.understanding_records) == 1

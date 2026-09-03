@@ -24,12 +24,12 @@ RawJobRecord
 
 ## 1. Mock Agent Pipeline
 
-The mock agent path is the future AI-agent shape. In tests and default service construction it does not call a real LLM and does not access the network. In the Streamlit app, it may use the active user's local Codex CLI login to generate only the `SearchPlan`; mock search and mock page collection still do not make real web requests.
+The mock agent path is the future AI-agent shape. In tests and default service construction it does not call a real LLM and does not access the network. In the Streamlit app, it may use the active user's local Codex CLI login to generate only the `SearchPlan`; mock search and mock page acquisition still do not make real web requests.
 
 It uses:
 
 - `ProfileCompletenessChecker`
-- `AutoSearchPlanBuilder` / `SearchPlanBuilder`
+- `BuildSearchPlanTool` / deterministic `SearchPlanBuilder`
 - `ToolExecutor`
 - `MockWebSearchTool`
 - `MockPageTool`
@@ -49,8 +49,8 @@ It uses:
             |
             v
 +-----------------------+
-| AutoSearchPlanBuilder |
-| or SearchPlanBuilder  |
+| build_search_plan     |
+| SearchPlanBuilder      |
 | Build SearchPlan      |
 +-----------+-----------+
             |
@@ -68,12 +68,12 @@ It uses:
             v
 +-----------------------+
 | ToolExecutor          |
-| Run mock collect_page |
+| Run mock acquire_page |
 +-----------+-----------+
             |
             v
 +-----------------------+
-| PageContent           |
+| PageDocument           |
 +-----------+-----------+
             |
             v
@@ -126,7 +126,7 @@ This path does make a direct Python HTTP request to the explicitly configured UR
               |
               v
 +---------------------------+
-| PageContent               |
+| PageDocument               |
 | html, visible text, links |
 +-------------+-------------+
               |
@@ -217,7 +217,7 @@ Python profile completeness check
         Program filters and ranks URLs
                 |
                 v
-        collect_page fetches page content
+        acquire_page fetches page content
                 |
                 v
         JobExtractor creates RawJobRecord
@@ -274,15 +274,15 @@ This is why the current project should avoid growing page-specific parsing rules
 | --- | --- | --- | --- | --- |
 | User profile | Example YAML | `profile.example.yaml` | `UserProfile` | Describe target roles, skills, company types, and locations. |
 | Profile check | `ProfileCompletenessChecker` | `UserProfile` | `ProfileCompletenessResult` | Deterministically check required fields before search. |
-| Search plan | `AutoSearchPlanBuilder` / `SearchPlanBuilder` | `UserProfile` | `SearchPlan` | Generate target roles, locations, company types, and keywords. Streamlit mock-agent runs try local Codex CLI first and fall back to deterministic rules. |
+| Search plan | `BuildSearchPlanTool` / `SearchPlanBuilder` | `SearchStrategyContext` | `SearchPlan` | Generate bounded role-led queries from profile and cross-round history using deterministic Python rules. |
 | Mock web search | `MockWebSearchTool` | `SearchPlan` | `CandidateSource` list | Simulate finding candidate URLs. No network requests. |
 | Manual source URLs | `ManualSourceTool` | Configured sources | `CandidateSource` list | Return explicitly configured URLs for manual testing. |
-| Mock page collection | `MockPageTool` | `CandidateSource` | `PageContent` | Simulate fetching page text. No network requests. |
-| HTTP page collection | `HttpPageTool` | `CandidateSource` | `PageContent` | Fetch one explicitly configured URL and extract visible text and links with Python stdlib. |
-| Technical page routing | `filter_pages` / `PageFilterTool` | `PageContent` | readable / recoverable / rejected pages | Program-owned Stage 1 routing for fetch status, auth walls, short text, empty rendered bodies, and recovery signals. |
+| Mock page acquisition | `MockPageTool` | `CandidateSource` | `PageDocument` | Simulate fetching page text. No network requests. |
+| HTTP page acquisition | `HttpPageTool` | `CandidateSource` | `PageDocument` | Fetch one explicitly configured URL, detect JS shells, recover embedded content, and use the browser fallback when required. |
+| Page analysis | `PageAnalysisTool` | `PageDocument` | cleaned/classified pages and quality outcomes | Clean acquired content, run quality checks, and perform semantic classification. It does not access the network or recover pages. |
 | Semantic page routing | `PageSemanticClassifier` / `PageClassificationTool` | `AIPageInput` | job-detail pages and pending follow-ups | AI-owned Stage 2 routing for page types such as job detail, listing, portal, recruitment program, career home, and irrelevant. |
-| Job extraction | `RuleBasedJobExtractor` | `PageContent` | `RawJobRecord` list | Convert marker text or simple JD detail pages into raw job records. No LLM API call is made. |
-| Future LLM extraction | `LLMJobExtractor` plus concrete `LLMClient` | `PageContent` | `RawJobRecord` list | Future replacement for rule-based extraction when page formats become too varied for deterministic parsing. |
+| Job extraction | `RuleBasedJobExtractor` | `PageDocument` | `RawJobRecord` list | Convert marker text or simple JD detail pages into raw job records. No LLM API call is made. |
+| Future LLM extraction | `LLMJobExtractor` plus concrete `LLMClient` | `PageDocument` | `RawJobRecord` list | Future replacement for rule-based extraction when page formats become too varied for deterministic parsing. |
 | Validation | `validate_records` | `RawJobRecord` list | Valid records and errors | Reject records missing required fields. |
 | Normalization | `normalize_records` | Valid raw records | `JobRecord` list | Standardize company, title, location, and deduplication key. |
 | Deduplication | `deduplicate_records` | `JobRecord` list | Unique jobs and duplicates | Remove obvious duplicate jobs. |
@@ -304,7 +304,7 @@ The SVG implies several AI return types. These should become Pydantic models bef
 | `MatchAssessment` | Score fit, gaps, recommendation, explanation. | Score range, required reasons, no unsupported claims. |
 | `ContinueDecision` | Decide whether another search round is needed. | Round limit, target count, source coverage, budget. |
 
-The current code already has models for `UserProfile`, `SearchPlan`, `CandidateSource`, `PageContent`, `RawJobRecord`, and `JobRecord`. The future models above should be added around those existing models, not replace them.
+The current code already has models for `UserProfile`, `SearchPlan`, `CandidateSource`, `PageDocument`, `RawJobRecord`, and `JobRecord`. The future models above should be added around those existing models, not replace them.
 
 ## 8. Migration Path Toward The SVG
 
@@ -312,7 +312,7 @@ The recommended migration order is:
 
 1. Add an `orchestrator/` layer that owns run state, round limits, and the fixed workflow.
 2. Add Pydantic models for `CandidateProfileDecision`, `SearchStrategy`, `ToolPlan`, `JobUnderstanding`, `MatchAssessment`, and `ContinueDecision`.
-3. Expand `AutoSearchPlanBuilder` into a richer AI-backed search-strategy task while keeping validation and deterministic fallbacks.
+3. Add a validated future SearchPlanBuilder implementation behind the shared Protocol when AI planning is explicitly introduced.
 4. Replace `ManualSourceTool` / `MockWebSearchTool` with a real search tool behind the same `ToolExecutor`.
 5. Replace most rule-based page extraction with `LLMJobExtractor`, while keeping `RuleBasedJobExtractor` for mock pages and fallback.
 6. Add AI-backed job understanding and match assessment after normalization/deduplication.
@@ -411,7 +411,7 @@ Runs:
 
 ```text
 ProfileCompletenessChecker
--> AutoSearchPlanBuilder/SearchPlanBuilder
+-> build_search_plan/SearchPlanBuilder
 -> ToolExecutor
 -> MockWebSearchTool
 -> MockPageTool

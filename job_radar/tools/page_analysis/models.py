@@ -1,37 +1,9 @@
-"""Shared models for deterministic and semantic page processing."""
+"""Shared models for deterministic and semantic page analysis."""
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
-PageRouteStatus = Literal[
-    "rejected",
-    "recoverable",
-    "readable",
-]
-
-TechnicalRouteReason = Literal[
-    "fetch_error",
-    "bad_status_code",
-    "not_found",
-    "access_denied",
-    "redirected_to_error_page",
-    "rejection_keywords",
-    "auth_wall",
-    "insufficient_visible_text",
-    "html_body_empty",
-    "recoverable_metadata_present",
-    "needs_manual_review",
-]
-
-RecoverySource = Literal[
-    "json_ld",
-    "og_description",
-    "meta_description",
-    "embedded_json",
-    "important_links",
-]
 
 PageSemanticType = Literal[
     "job_detail",
@@ -79,32 +51,6 @@ SuggestedNextAction = Literal[
     "manual_review",
     "skip_until_more_context",
 ]
-
-
-class PageTechnicalRoute(BaseModel):
-    """Deterministic technical assessment for one collected page."""
-
-    status: PageRouteStatus
-    reason_codes: list[TechnicalRouteReason] = Field(default_factory=list)
-    reasons: list[str] = Field(default_factory=list)
-
-    text_length: int = 0
-    html_length: int = 0
-
-    recovery_sources: list[RecoverySource] = Field(default_factory=list)
-    evidence: dict[str, Any] = Field(default_factory=dict)
-
-
-class PageRecoveryResult(BaseModel):
-    """Result of deterministic same-page content recovery."""
-
-    success: bool = False
-    source: RecoverySource | None = None
-    text: str = ""
-
-    attempted_sources: list[RecoverySource] = Field(default_factory=list)
-    reasons: list[str] = Field(default_factory=list)
-    evidence: dict[str, Any] = Field(default_factory=dict)
 
 
 class PendingFollowup(BaseModel):
