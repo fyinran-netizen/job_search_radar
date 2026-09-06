@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 from job_radar.infra.llm.base import AIProvider
-from job_radar.infra.llm.prompt_loader import load_skill
+from job_radar.infra.llm.prompt_loader import load_runtime_prompt
 from job_radar.infra.llm.structured_output import validate_model
 from job_radar.tools.job_extraction.models import JobRecord
 from job_radar.tools.match_analysis.models import BasicGateResult
@@ -87,7 +87,7 @@ class SemanticMatchAnalyzer:
         basic_gate: BasicGateResult,
         understanding: JobRequirementFacts | None,
     ) -> tuple[str, str]:
-        skill = load_skill(self.skill_name)
+        skill = load_runtime_prompt(self.skill_name)
         schema = json.dumps(SemanticMatchAssessment.model_json_schema(), ensure_ascii=False, indent=2)
         system_prompt = "\n\n".join(
             [
@@ -145,5 +145,4 @@ def _job_payload(job: JobRecord) -> dict[str, Any]:
         "rule_based_match_reasons": job.match_reasons,
         "rule_based_missing_requirements": job.missing_requirements,
     }
-
 

@@ -15,10 +15,9 @@ from pydantic import TypeAdapter, ValidationError
 
 from job_radar.config import load_runtime_settings
 from job_radar.infra.llm.base import AIProvider
-from job_radar.infra.llm.codex import CodexCliProvider
 from job_radar.infra.llm.ollama import OllamaProvider
 from job_radar.tools.job_extraction.extraction import AIJobExtractionClient
-from job_radar.tools.job_extraction.models import AIPageInput
+from job_radar.tools.page_analysis.models import AIPageInput
 from job_radar.tools.job_extraction.models import RawJobRecord
 from job_radar.tools.page_analysis.models import PendingFollowup
 from job_radar.tools.page_acquisition.models import PageDocument
@@ -47,9 +46,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cleaned-pages-file", required=True, help="Path to cleaned AIPageInput[] JSON.")
     parser.add_argument(
         "--provider",
-        choices=["ollama", "codex"],
-        default=settings.extraction.provider,
-        help="Extraction provider. ollama uses the local Ollama API; codex uses Codex CLI.",
+        choices=["ollama"],
+        default="ollama",
+        help="Extraction provider. Only the local Ollama API is supported.",
     )
     parser.add_argument("--timeout-seconds", type=int, default=240)
     parser.add_argument("--max-attempts", type=int, default=3, help="Maximum AI attempts per page batch.")
@@ -220,7 +219,7 @@ def _extract_records(
     pending_followups = []
     retry_count = 0
 
-    if provider_name in {"codex", "ollama"}:
+    if provider_name == "ollama":
         if batch_size < 1:
             raise ValueError("--batch-size must be greater than 0")
         if max_attempts < 1:
@@ -338,12 +337,8 @@ def _record_belongs_to_page(record: RawJobRecord, page_input: AIPageInput) -> bo
 
 
 def _create_ai_provider(provider_name: str, ollama_model: str, ollama_base_url: str) -> AIProvider:
-    if provider_name == "codex":
-        codex_provider = CodexCliProvider()
-        if not codex_provider.is_available():
-            raise RuntimeError("Codex CLI is not installed or not authenticated. Run `codex login` first.")
-        return codex_provider
-
+    if provider_name != "ollama":
+        raise ValueError(f"Unsupported extraction provider: {provider_name}")
     ollama_provider = OllamaProvider(model=ollama_model, base_url=ollama_base_url)
     if not ollama_provider.is_available():
         raise RuntimeError(

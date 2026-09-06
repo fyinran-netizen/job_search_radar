@@ -42,6 +42,11 @@ DEFAULT_REQUIRED_FIELDS = [
         question="Add expected graduation year or date, for example 2026 or 2026-06.",
         is_present=_has_graduation_year,
     ),
+    RequiredProfileField(
+        name="preferred_locations",
+        question="Add at least one preferred location.",
+        is_present=lambda profile: _has_non_empty_items(profile.preferred_locations),
+    ),
 ]
 
 

@@ -9,12 +9,10 @@ from pydantic import BaseModel, Field
 from job_radar.infra.llm.base import AIProvider
 from job_radar.infra.logging import get_logger
 from job_radar.tools.base import BaseTool
-from job_radar.tools.job_extraction.extraction import build_ai_page_input
-from job_radar.tools.job_extraction.models import AIPageInput
 from job_radar.tools.page_acquisition.models import PageDocument, RejectedPage
-from job_radar.tools.page_analysis.models import PendingFollowup
+from job_radar.tools.page_analysis.models import AIPageInput, PageAnalysisTrace, PendingFollowup
 from job_radar.tools.page_analysis.semantic_classification import PageSemanticClassifier, pending_followup_from_semantic_classification
-from job_radar.tools.page_analysis.cleaning import parse_acquired_page
+from job_radar.tools.page_analysis.preparation import prepare_page
 
 logger = get_logger(__name__)
 
@@ -33,6 +31,7 @@ class PageAnalysisOutput(BaseModel):
     accepted_pages: list[AIPageInput] = Field(default_factory=list)
     pending_followups: list[PendingFollowup] = Field(default_factory=list)
     rejected_pages: list[RejectedPage] = Field(default_factory=list)
+    traces: list[PageAnalysisTrace] = Field(default_factory=list)
     report: dict[str, Any] = Field(default_factory=dict)
 
     def tool_event_summary(self) -> str:
@@ -52,20 +51,26 @@ class PageAnalysisTool(BaseTool):
         data = payload if isinstance(payload, PageAnalysisInput) else PageAnalysisInput.model_validate(payload)
         started = perf_counter()
         cleaned: list[AIPageInput] = []
+        traces: list[PageAnalysisTrace] = []
         pending: list[PendingFollowup] = []
         rejected: list[RejectedPage] = []
         errors: list[dict[str, Any]] = []
         for acquired in data.pages:
-            page = parse_acquired_page(acquired)
-            quality_reason = _quality_failure(page, data.min_text_length)
-            if quality_reason:
-                rejected.append(RejectedPage(url=page.url, source_name=page.source_name, title=page.title, reasons=[quality_reason], text_length=len(page.text.strip()), metadata=page.metadata))
-                continue
             try:
-                cleaned.append(build_ai_page_input(page, max_text_chars=data.max_text_chars))
+                prepared = prepare_page(acquired, max_text_chars=data.max_text_chars)
             except Exception as exc:
-                errors.append({"url": page.url, "title": page.title, "reason": str(exc)})
-                pending.append(_analysis_pending(page, f"page_cleaning_failed: {exc}"))
+                errors.append({"url": acquired.url, "title": acquired.title, "reason": str(exc)})
+                traces.append(PageAnalysisTrace(url=acquired.url))
+                pending.append(_analysis_pending(acquired, f"page_cleaning_failed: {exc}"))
+                continue
+            page = prepared.page
+            trace = prepared.trace
+            traces.append(trace)
+            quality_reason = _quality_failure(acquired.model_copy(update={"text": page.visible_text}), data.min_text_length)
+            if quality_reason:
+                rejected.append(RejectedPage(url=page.url, source_name=page.source_name, title=page.title, reasons=[quality_reason], text_length=len(page.visible_text.strip()), metadata=acquired.metadata))
+                continue
+            cleaned.append(page)
 
         accepted: list[AIPageInput] = []
         classifications: list[dict[str, Any]] = []
@@ -84,7 +89,7 @@ class PageAnalysisTool(BaseTool):
 
         report = {"started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "input_page_count": len(data.pages), "cleaned_page_count": len(cleaned), "accepted_page_count": len(accepted), "pending_followup_count": len(pending), "rejected_count": len(rejected), "error_count": len(errors), "errors": errors, "classifications": classifications, "elapsed_ms": round((perf_counter() - started) * 1000, 1)}
         logger.info("analyze_page elapsed_ms=%.1f accepted=%s pending=%s rejected=%s errors=%s", report["elapsed_ms"], len(accepted), len(pending), len(rejected), len(errors))
-        return PageAnalysisOutput(accepted_pages=accepted, pending_followups=pending, rejected_pages=rejected, report=report)
+        return PageAnalysisOutput(accepted_pages=accepted, pending_followups=pending, rejected_pages=rejected, traces=traces, report=report)
 
 
 def _quality_failure(page: PageDocument, minimum: int) -> str | None:

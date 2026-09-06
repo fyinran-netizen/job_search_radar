@@ -7,11 +7,12 @@ controller can call after making a decision.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
 from job_radar.agent.models import AgentError, AgentLimits, AgentState
+from job_radar.agent.action_names import AGENT_ACTION_NAMES, AgentActionName
 from job_radar.agent.transitions import stop_with_reason
 from job_radar.profile.models import UserProfile
 from job_radar.tools.executor import ToolExecutor
@@ -25,18 +26,6 @@ from job_radar.tools.web_search.source_selection import normalize_url, select_so
 from job_radar.infra.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-AgentActionName = Literal[
-    "build_search_plan",
-    "web_search",
-    "acquire_page",
-    "analyze_page",
-    "job_extraction",
-    "job_understanding",
-    "match_analysis",
-    "stop",
-]
 
 
 class AgentAction(BaseModel):
@@ -154,11 +143,7 @@ def available_actions(
 ) -> list[AgentActionName]:
     """List actions passing hard checks; this does not rank or choose them."""
 
-    names: tuple[AgentActionName, ...] = (
-        "build_search_plan", "web_search", "acquire_page", "analyze_page", "job_extraction",
-        "job_understanding", "match_analysis", "stop",
-    )
-    return [name for name in names if action_availability(name, state, limits, profile=profile).available]
+    return [name for name in AGENT_ACTION_NAMES if action_availability(name, state, limits, profile=profile).available]
 
 
 def execute_action(
@@ -213,7 +198,7 @@ def _run_web_search(state: AgentState, executor: ToolExecutor, limits: AgentLimi
         raise TypeError("web_search must return a list")
     sources = [item if isinstance(item, CandidateSource) else CandidateSource.model_validate(item) for item in result]
     previous_urls = {normalize_url(source.url) for source in state.candidate_sources}
-    selected = select_sources(sources, previous_urls=previous_urls, min_relevance_score=limits.min_relevance_score, max_sources=limits.max_sources_per_round)
+    selected = select_sources(sources, previous_urls=previous_urls, max_sources=limits.max_sources_per_round)
     all_candidates = _merge_by_key(state.candidate_sources, sources, lambda item: normalize_url(item.url))
     logger.info(
         "search_round round_index=%s queries=%s executed_queries=%s new_urls=%s selected_sources=%s accepted_pages=%s stop_reason=%s",
@@ -275,6 +260,7 @@ def _run_analyze_page(state: AgentState, executor: ToolExecutor) -> AgentState:
         "analyzed_page_urls": _merge_strings(state.analyzed_page_urls, [page.url for page in pages]),
         "pending_followups": [*state.pending_followups, *result.pending_followups],
         "rejected_pages": [*state.rejected_pages, *result.rejected_pages],
+        "page_analysis_traces": _merge_by_key(state.page_analysis_traces, result.traces, lambda trace: trace.url),
         "errors": [*state.errors, *_report_errors("analyze_page", result.report)],
     })
 

@@ -10,8 +10,8 @@ from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
-from job_radar.tools.job_extraction.extraction import build_ai_page_input
-from job_radar.tools.job_extraction.models import AIPageInput
+from job_radar.tools.page_analysis.models import AIPageInput
+from job_radar.tools.page_analysis.preparation import build_ai_page_input
 from job_radar.tools.page_acquisition.models import PageDocument
 from job_radar.tools.page_analysis.cleaning import clean_page_text
 

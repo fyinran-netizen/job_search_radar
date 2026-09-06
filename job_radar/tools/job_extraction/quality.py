@@ -3,10 +3,8 @@
 from collections import Counter
 from urllib.parse import urlparse
 
-from job_radar.tools.job_extraction.models import (
-    AIPageInput,
-    RawJobRecord,
-)
+from job_radar.tools.page_analysis.models import AIPageInput
+from job_radar.tools.job_extraction.models import RawJobRecord
 
 from job_radar.tools.page_analysis.models import (
     PendingFollowup,
@@ -68,6 +66,24 @@ def triage_extracted_page(
                 "manual_review"
             ),
             priority=60,
+        )
+
+    if any(not record.company_name for record in records):
+        return _pending(
+            page,
+            pending_kind="uncertain",
+            reasons=[
+                "primary JD does not disclose an explicit employer name",
+                "company_name must be resolved before validation and persistence",
+            ],
+            evidence={
+                "extracted_job_count": len(records),
+                "missing_company_name_count": sum(
+                    not record.company_name for record in records
+                ),
+            },
+            suggested_next_action="manual_review",
+            priority=70,
         )
 
     missing_description = sum(

@@ -6,14 +6,15 @@ from pydantic import BaseModel, Field
 
 from job_radar.infra.llm.base import AIProvider
 from job_radar.infra.llm.prompt_builder import build_json_prompt
-from job_radar.infra.llm.prompt_loader import load_skill
+from job_radar.infra.llm.prompt_loader import load_runtime_prompt
 from job_radar.infra.llm.structured_output import validate_model
-from job_radar.tools.job_extraction.models import AIPageInput
 from job_radar.tools.page_analysis.models import (
+    AIPageInput,
     PageSemanticType,
     PendingFollowup,
     SuggestedNextAction,
 )
+from job_radar.tools.page_analysis.preparation import build_classification_excerpt
 
 
 class PageSemanticClassification(BaseModel):
@@ -72,7 +73,7 @@ class PageSemanticClassifier:
     ) -> PageSemanticClassification:
         """Return only semantic type and a bounded routing hint."""
 
-        skill = load_skill(
+        skill = load_runtime_prompt(
             self.skill_name
         )
 
@@ -81,10 +82,8 @@ class PageSemanticClassifier:
             {
                 "page": {
                     "title": page.title,
-                    "visible_text": (
-                        page.visible_text[
-                            : self.max_text_chars
-                        ]
+                    "visible_text": build_classification_excerpt(
+                        page.title, page.visible_text, self.max_text_chars
                     ),
                     "important_links": [
                         link.model_dump()

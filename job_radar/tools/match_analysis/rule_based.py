@@ -1,7 +1,8 @@
 """Transparent rule-based job matching."""
 
 from job_radar.tools.job_extraction.models import JobRecord
-from job_radar.profile.models import MatchingRules, UserProfile
+from job_radar.profile.models import UserProfile
+from job_radar.tools.match_analysis.models import MatchingRules
 
 
 def _contains_any(text: str, keywords: list[str]) -> list[str]:

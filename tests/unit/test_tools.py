@@ -3,7 +3,6 @@ import json
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from job_radar.infra.llm.codex import CodexCliProvider
 from tests.doubles.mock_ai_provider import MockAIProvider
 from job_radar.infra.llm.ollama import OllamaProvider
 from job_radar.infra.llm.structured_output import StructuredOutputError, parse_json_output, validate_model
@@ -17,12 +16,13 @@ from job_radar.tools.job_extraction.models import ImportantLink
 from job_radar.tools.page_analysis.semantic_classification import PageSemanticClassifier
 from job_radar.tools.job_understanding.analyzer import JobUnderstandingAnalyzer
 from job_radar.tools.match_analysis.analyzer import SemanticMatchAnalyzer
-from job_radar.tools.search_plan import SearchPlanBuilder
+from job_radar.tools.search_plan import SearchPlanBuilder, SearchPlanLimits
 from job_radar.tools.search_plan import BuildSearchPlanTool, SearchPlanToolInput
 from job_radar.tools.web_search.source_selection import normalize_url, select_sources
 from job_radar.config import load_matching_rules, load_profile
 from job_radar.tools.job_extraction.models import RawJobRecord
 from job_radar.tools.web_search.models import CandidateSource, SearchPlan
+from job_radar.tools.web_search.providers.tavily import TavilyWebSearchTool
 from job_radar.tools.web_search.config import load_candidate_sources
 from job_radar.profile.models import UserProfile
 from job_radar.tools.page_acquisition.models import PageDocument
@@ -61,11 +61,12 @@ def test_profile_checker_reports_incomplete_profile() -> None:
     assert result.questions
 
 
-def test_profile_checker_allows_optional_preferences() -> None:
+def test_profile_checker_requires_preferred_locations_but_allows_optional_preferences() -> None:
     profile = UserProfile(
         graduation_date="2026",
         target_roles=["Data Analyst"],
         skills=["Python"],
+        preferred_locations=["Shanghai"],
     )
 
     result = ProfileCompletenessChecker().check(profile)
@@ -94,6 +95,7 @@ def test_search_plan_builder_generates_role_led_queries() -> None:
         target_roles=["Data Analyst"],
         skills=["Python"],
         preferred_locations=["Shanghai"],
+        excluded_locations=["Beijing"],
         preferred_company_types=["Bank"],
     )
 
@@ -106,6 +108,7 @@ def test_search_plan_builder_generates_role_led_queries() -> None:
     assert plan.queries
     assert all("Data Analyst" in query for query in plan.queries)
     assert all(token in plan.queries[0] for token in ("Shanghai", "Bank"))
+    assert all("Beijing" not in query for query in plan.queries)
 
 
 def test_search_plan_builder_maps_september_to_next_cohort() -> None:
@@ -126,6 +129,50 @@ def test_search_plan_builder_maps_september_to_next_cohort() -> None:
     assert "Software Engineer" in plan.queries[0]
 
 
+@pytest.mark.parametrize(
+    ("graduation_date", "cohort_year"),
+    [("2026-01", 2026), ("2026-08", 2026), ("2026-09", 2027), ("2026-12", 2027)],
+)
+def test_cohort_month_boundaries(graduation_date: str, cohort_year: int) -> None:
+    from job_radar.profile.cohort import infer_graduation_cohort
+
+    cohort = infer_graduation_cohort(graduation_date)
+
+    assert cohort is not None
+    assert cohort.cohort_year == cohort_year
+    assert cohort.label == f"{cohort_year}届"
+    assert cohort.graduation_window == (f"{cohort_year - 1}-09", f"{cohort_year}-06")
+
+
+def test_user_profile_cleans_form_values_and_deduplicates() -> None:
+    profile = UserProfile.from_form_data(
+        {
+            "graduation_date": " 2026-12 ",
+            "target_roles": [" Data  Analyst ", "data analyst", ""],
+            "skills": " Python ; SQL\npython ",
+            "preferred_locations": [" Shanghai ", "shanghai", None],
+            "excluded_locations": " Beijing ; ; ",
+        }
+    )
+
+    assert profile.graduation_date == "2026-12"
+    assert profile.target_roles == ["Data Analyst"]
+    assert profile.skills == ["Python", "SQL"]
+    assert profile.preferred_locations == ["Shanghai"]
+    assert profile.excluded_locations == ["Beijing"]
+
+
+def test_user_profile_rejects_conflicting_locations() -> None:
+    with pytest.raises(ValidationError, match="cannot overlap"):
+        UserProfile(
+            graduation_date="2026-06",
+            target_roles=["Data Analyst"],
+            skills=["Python"],
+            preferred_locations=[" Shanghai "],
+            excluded_locations=["shanghai"],
+        )
+
+
 def test_search_plan_tool_generates_distinct_role_led_round_queries() -> None:
     profile = UserProfile(
         graduation_date="2026-06", target_roles=["Data Analyst"],
@@ -139,6 +186,65 @@ def test_search_plan_tool_generates_distinct_role_led_round_queries() -> None:
     assert all("Data Analyst" in query and "Sydney" in query and "Bank" in query for query in first.queries)
 
 
+def test_search_plan_builder_emits_one_query_per_role_up_to_limit() -> None:
+    profile = UserProfile(
+        graduation_date="2026-06",
+        target_roles=["Data Analyst", "Software Engineer", "Product Analyst"],
+    )
+
+    plan = SearchPlanBuilder().build(profile, limits=SearchPlanLimits(max_queries=2))
+
+    assert len(plan.queries) == 2
+    assert all(any(role in query for role in profile.target_roles) for query in plan.queries)
+
+
+def test_source_selection_keeps_low_score_aggregate_and_preserves_metadata() -> None:
+    source = CandidateSource(
+        url="https://example.org/careers?utm_source=test",
+        title="All opportunities",
+        source_name="Example",
+        relevance_score=1,
+        is_official=False,
+    )
+
+    selected = select_sources([source], min_relevance_score=99)
+
+    assert selected == [source.model_copy(update={"url": "https://example.org/careers"})]
+
+
+@pytest.mark.parametrize(
+    ("query_count", "max_sources", "expected_quotas"),
+    [(1, 10, [10]), (2, 10, [5, 5]), (3, 10, [4, 3, 3]), (4, 3, [1, 1, 1, 0])],
+)
+def test_tavily_allocates_dynamic_query_quotas(query_count, max_sources, expected_quotas) -> None:
+    tool = TavilyWebSearchTool(max_sources=max_sources)
+
+    assert tool._query_quotas(query_count) == expected_quotas
+
+
+def test_tavily_executes_all_queries_within_budget_and_deduplicates(monkeypatch) -> None:
+    monkeypatch.setenv("TAVILY_API_KEY", "mock-key")
+    calls = []
+
+    def fake_search(_api_key, query, max_results):
+        calls.append((query, max_results))
+        return [
+            {"url": f"https://example.org/{query}", "title": query, "score": 0.5},
+            {"url": "https://example.org/shared?utm_source=test", "title": "Shared", "score": 0.4},
+        ]
+
+    tool = TavilyWebSearchTool(max_sources=6)
+    monkeypatch.setattr(tool, "_search", fake_search)
+    plan = SearchPlan(queries=["one", "two", "three"])
+
+    sources = tool.run(plan)
+
+    assert [query for query, _quota in calls] == plan.queries
+    assert [quota for _query, quota in calls] == [2, 2, 2]
+    assert len(sources) <= 6
+    assert len({normalize_url(source.url) for source in sources}) == len(sources)
+
+
 def test_source_selection_normalizes_and_deduplicates_urls_across_rounds() -> None:
     source = CandidateSource(
         url="https://Careers.Example/job/1/?utm_source=test#top", title="Role",
@@ -146,39 +252,6 @@ def test_source_selection_normalizes_and_deduplicates_urls_across_rounds() -> No
     )
     assert normalize_url(source.url) == "https://careers.example/job/1"
     assert select_sources([source], previous_urls={"https://careers.example/job/1"}) == []
-
-
-def test_codex_provider_uses_utf8_for_prompt(monkeypatch) -> None:
-    captured = {}
-
-    def fake_which(_command):
-        return "codex.CMD"
-
-    def fake_run(command, **kwargs):
-        captured["command"] = command
-        captured["input"] = kwargs.get("input")
-        captured["encoding"] = kwargs.get("encoding")
-        captured["errors"] = kwargs.get("errors")
-
-        class Result:
-            returncode = 0
-            stdout = '{"target_roles":[],"locations":[],"company_types":[],"keywords":[]}'
-            stderr = ""
-
-        return Result()
-
-    monkeypatch.setattr("job_radar.infra.llm.codex.shutil.which", fake_which)
-    monkeypatch.setattr("job_radar.infra.llm.codex.subprocess.run", fake_run)
-
-    provider = CodexCliProvider()
-    prompt = "\ufeff娴嬭瘯鎻愮ず"
-    provider.generate_json(prompt)
-
-    assert captured["command"] == ["codex.CMD", "exec"]
-    assert captured["input"] == prompt
-    assert captured["encoding"] == "utf-8"
-    assert captured["errors"] == "replace"
-
 
 
 def test_ollama_provider_parses_message_content_json(monkeypatch) -> None:
@@ -657,6 +730,31 @@ def test_extraction_triage_marks_small_sparse_role_list_pending() -> None:
     assert pending.role_titles == ["Motion Control Algorithm Engineer", "Agent Developer"]
 
 
+def test_extraction_triage_keeps_undisclosed_randstad_employer_pending() -> None:
+    page_input = AIPageInput(
+        url="https://randstad.example/job/1",
+        source_name="Randstad",
+        title="Software Engineer",
+        visible_text="Our client is seeking a Software Engineer.",
+    )
+    pending = triage_extracted_page(
+        page_input,
+        [
+            RawJobRecord(
+                title="Software Engineer",
+                location="Sydney",
+                source_url=page_input.url,
+                source_name="Randstad",
+            )
+        ],
+    )
+
+    assert pending is not None
+    assert pending.pending_kind == "uncertain"
+    assert pending.suggested_next_action == "manual_review"
+    assert pending.company_name is None
+
+
 def test_build_ai_page_input_preserves_provenance_but_drops_search_scoring() -> None:
     page = PageDocument(
         url="https://careers.example/job/123",
@@ -841,7 +939,106 @@ def test_ai_job_extraction_client_prompts_with_minimal_page_input() -> None:
     assert '"is_official": true' not in input_payload
     assert "https://careers.example/job/123" not in input_payload
     assert "important_links" not in input_payload
-    assert "Return every explicitly named position" in prompt
+    assert "only the one primary job" in prompt
+    assert "related, similar, recommended" in prompt
+    assert "Return every explicitly named position" not in prompt
+
+
+def test_ai_job_extraction_keeps_four_job_detail_pages_to_one_primary_job_each() -> None:
+    provider = MockAIProvider(
+        [
+            {
+                "page_id": f"page-{index}",
+                "page_context": {"company_name": "Example"},
+                "jobs": [{"title": f"Primary Role {index}", "location": "Sydney"}],
+            }
+            for index in range(1, 5)
+        ]
+    )
+    pages = [
+        AIPageInput(
+            url=f"https://careers.example/job/{index}",
+            title=f"Primary Role {index}",
+            visible_text=(
+                f"Primary Role {index}\n"
+                "Related jobs: Other Role A, Other Role B\n"
+                "Similar jobs: Other Role C\n"
+                "Recommended jobs: Other Role D"
+            ),
+        )
+        for index in range(1, 5)
+    ]
+
+    records = AIJobExtractionClient(provider).extract_jobs_from_inputs(pages)
+
+    assert len(records) == 4
+    assert [record.title for record in records] == [
+        "Primary Role 1",
+        "Primary Role 2",
+        "Primary Role 3",
+        "Primary Role 4",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("title", "visible_text", "expected"),
+    [
+        (
+            "Software Engineer | Example Corp",
+            "Software Engineer responsibilities and requirements.",
+            "Example Corp",
+        ),
+        (
+            "Software Engineer",
+            "Employer: Example Corp\nSoftware Engineer responsibilities.",
+            "Example Corp",
+        ),
+        (
+            "Software Engineer",
+            "公司名称：示例科技有限公司\n岗位职责：负责平台开发。",
+            "示例科技有限公司",
+        ),
+    ],
+)
+def test_ai_job_extraction_company_name_uses_explicit_main_jd_text(
+    title: str, visible_text: str, expected: str | None
+) -> None:
+    provider = MockAIProvider(
+        {
+            "page_id": "page-1",
+            "page_context": {"company_name": None},
+            "jobs": [{"title": "Software Engineer", "location": "Sydney"}],
+        }
+    )
+    page_input = AIPageInput(
+        url="https://careers.example/job/1",
+        title=title,
+        visible_text=visible_text,
+    )
+
+    records = AIJobExtractionClient(provider).extract_jobs_from_input(page_input)
+
+    assert records[0].company_name == expected
+
+
+def test_ai_job_extraction_company_name_falls_back_to_source_metadata() -> None:
+    provider = MockAIProvider(
+        {
+            "page_id": "page-1",
+            "page_context": {"company_name": None},
+            "jobs": [{"title": "Software Engineer", "location": "Sydney"}],
+        }
+    )
+    page_input = AIPageInput(
+        url="https://randstad.example/job/1",
+        source_company_name="Example Employer",
+        title="Software Engineer",
+        visible_text="Our client is seeking a Software Engineer.",
+    )
+
+    records = AIJobExtractionClient(provider).extract_jobs_from_input(page_input)
+
+    assert records[0].company_name == "Example Employer"
 
 
 def test_ai_job_extraction_falls_back_to_source_location_after_semantic_response() -> None:

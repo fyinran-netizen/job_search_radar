@@ -14,6 +14,14 @@ class GraduationCohort(BaseModel):
     cohort_label: str
     search_terms: list[str]
 
+    @property
+    def label(self) -> str:
+        return self.cohort_label
+
+    @property
+    def graduation_window(self) -> tuple[str, str]:
+        return self.graduation_start, self.graduation_end
+
 
 def infer_graduation_cohort(graduation_date: str) -> GraduationCohort | None:
     """Infer cohort from a year or year-month value.

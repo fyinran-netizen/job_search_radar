@@ -5,10 +5,10 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from job_radar.profile.models import ProfileCompletenessResult
-from job_radar.tools.job_extraction.models import AIPageInput, JobRecord
+from job_radar.tools.job_extraction.models import JobRecord
 from job_radar.tools.job_understanding.models import JobUnderstandingRecord
 from job_radar.tools.page_acquisition.models import PageDocument, RejectedPage, ToolEvent
-from job_radar.tools.page_analysis.models import PendingFollowup
+from job_radar.tools.page_analysis.models import AIPageInput, PageAnalysisTrace, PendingFollowup
 from job_radar.tools.web_search.models import CandidateSource, SearchPlan
 
 
@@ -79,6 +79,7 @@ class AgentState(BaseModel):
     extracted_page_urls: list[str] = Field(default_factory=list)
     pending_followups: list[PendingFollowup] = Field(default_factory=list)
     rejected_pages: list[RejectedPage] = Field(default_factory=list)
+    page_analysis_traces: list[PageAnalysisTrace] = Field(default_factory=list)
 
     prepared_jobs: list[JobRecord] = Field(default_factory=list)
     understanding_records: list[JobUnderstandingRecord] = Field(default_factory=list)

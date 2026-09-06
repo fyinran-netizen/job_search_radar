@@ -1,4 +1,4 @@
-"""Application service for running the bounded agent action loop."""
+"""Application service for the bounded, resumable LangGraph workflow."""
 
 from __future__ import annotations
 
@@ -6,22 +6,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.types import StateSnapshot
 from pydantic import BaseModel, Field
 
 from job_radar.agent.actions import execute_action
-from job_radar.agent.controllers import Controller, DecisionContext, RuleBasedController
+from job_radar.agent.controllers import Controller, RuleBasedController
+from job_radar.agent.graph import build_agent_graph
 from job_radar.agent.models import AgentLimits, AgentState
-from job_radar.infra.paths import DEFAULT_DB_PATH
+from job_radar.infra.logging import configure_logging, new_run_id
+from job_radar.infra.paths import DEFAULT_CHECKPOINT_DB_PATH, DEFAULT_DB_PATH
 from job_radar.profile.models import UserProfile
 from job_radar.tools.executor import ToolExecutor
-from job_radar.infra.logging import configure_logging, get_logger, new_run_id
-
-logger = get_logger(__name__)
+from job_radar.services.persistence import JobPersistenceService
+from job_radar.services.runtime import create_real_agent_runtime
 
 
 class DecisionTraceEntry(BaseModel):
-    """One controller decision and the state observed around it."""
-
     step: int
     available_actions: list[str] = Field(default_factory=list)
     selected_action: str
@@ -30,110 +31,144 @@ class DecisionTraceEntry(BaseModel):
 
 
 class AgentServiceResult(BaseModel):
-    """Final state and trace produced by one agent loop."""
-
     state: AgentState
     decision_trace: list[DecisionTraceEntry] = Field(default_factory=list)
+    run_id: str | None = None
+    checkpoint_id: str | None = None
+    interrupted: bool = False
+
+
+class CheckpointHistoryEntry(BaseModel):
+    """Public, stable representation of one LangGraph state snapshot."""
+
+    run_id: str
+    checkpoint_id: str
+    parent_checkpoint_id: str | None = None
+    created_at: str | None = None
+    next_nodes: list[str] = Field(default_factory=list)
+    state: AgentState
 
 
 @dataclass
 class AgentService:
-    """Run controller decisions through the existing bounded action handlers."""
-
     controller: Controller
     executor: ToolExecutor
     limits: AgentLimits = field(default_factory=AgentLimits)
     max_steps: int | None = None
+    checkpoint_path: Path = DEFAULT_CHECKPOINT_DB_PATH
+    db_path: Path = DEFAULT_DB_PATH
+    persistence_service: JobPersistenceService | None = None
 
-    def run(
-        self,
-        profile: UserProfile,
-        *,
-        initial_state: AgentState | None = None,
-    ) -> AgentServiceResult:
-        """Run until the injected controller selects ``stop``."""
+    def __post_init__(self) -> None:
+        if self.persistence_service is None:
+            self.persistence_service = JobPersistenceService(self.db_path)
 
-        state = initial_state or AgentState()
-        run_id = configure_logging(new_run_id())
-        logger.info("agent_run_start run_id=%s", run_id)
-        trace: list[DecisionTraceEntry] = []
-        step_limit = self.max_steps or self.limits.max_steps
+    def run(self, profile: UserProfile, *, initial_state: AgentState | None = None,
+            run_id: str | None = None, pause_after_action: bool = False) -> AgentServiceResult:
+        run_id = run_id or configure_logging(new_run_id())
+        limits = self.limits.model_copy(update={"max_steps": self.max_steps or self.limits.max_steps})
+        config = {"configurable": {"thread_id": run_id}}
+        with SqliteSaver.from_conn_string(str(self.checkpoint_path)) as saver:
+            graph = self._build_graph(saver, limits=limits, pause_after_action=pause_after_action)
+            result = graph.invoke({"agent_state": initial_state or AgentState(), "profile": profile,
+                                   "step": 0, "decision_trace": [], "current_action": None,
+                                   "current_stop_reason": None}, config)
+            snapshot = graph.get_state(config)
+            return _result_from_graph(result, run_id, checkpoint_id=_checkpoint_id(snapshot),
+                                      interrupted=bool(snapshot.next))
 
-        for step in range(1, step_limit + 1):
-            context = DecisionContext(
-                state=state,
-                limits=self.limits,
-                profile=profile,
-            )
-            action = self.controller.decide(context)
-            logger.info(
-                "agent_decision run_id=%s step=%s round_index=%s action=%s",
-                run_id, step, state.round_index, action.action,
-            )
-            trace.append(
-                DecisionTraceEntry(
-                    step=step,
-                    available_actions=list(context.available_actions),
-                    selected_action=action.action,
-                    rationale=action.rationale,
-                    state_summary=self._state_summary(state),
-                )
-            )
+    def resume(self, run_id: str, *, pause_after_action: bool = False) -> AgentServiceResult:
+        """Continue from the latest checkpoint for ``run_id``."""
+        configure_logging(run_id)
+        config = {"configurable": {"thread_id": run_id}}
+        limits = self.limits.model_copy(update={"max_steps": self.max_steps or self.limits.max_steps})
+        with SqliteSaver.from_conn_string(str(self.checkpoint_path)) as saver:
+            graph = self._build_graph(saver, limits=limits, pause_after_action=pause_after_action)
+            if not graph.get_state(config).values:
+                raise KeyError(f"No checkpoint exists for run_id={run_id!r}")
+            result = graph.invoke(None, config)
+            snapshot = graph.get_state(config)
+            return _result_from_graph(result, run_id, checkpoint_id=_checkpoint_id(snapshot),
+                                      interrupted=bool(snapshot.next))
 
-            if action.action == "stop":
-                state = execute_action(action, state, self.executor, self.limits, profile=profile)
-                logger.info("agent_stop run_id=%s round_index=%s stop_reason=%s", run_id, state.round_index, state.stop_reason)
-                return AgentServiceResult(state=state, decision_trace=trace)
+    def state_history(self, run_id: str) -> list[CheckpointHistoryEntry]:
+        """Return public checkpoint snapshots, newest checkpoint first."""
+        config = {"configurable": {"thread_id": run_id}}
+        limits = self.limits.model_copy(update={"max_steps": self.max_steps or self.limits.max_steps})
+        with SqliteSaver.from_conn_string(str(self.checkpoint_path)) as saver:
+            graph = self._build_graph(saver, limits=limits)
+            return [_history_entry(snapshot, run_id) for snapshot in graph.get_state_history(config)]
 
-            next_state = execute_action(action, state, self.executor, self.limits, profile=profile)
-            if next_state == state:
-                raise RuntimeError(
-                    f"Agent action {action.action!r} did not change State; refusing to repeat it"
-                )
-            state = next_state
+    def replay_from_checkpoint(self, run_id: str, checkpoint_id: str, *,
+                               pause_after_action: bool = False) -> AgentServiceResult:
+        """Run exactly the next action from a selected checkpoint.
 
-        state = state.model_copy(update={"stop_reason": "max_steps reached"})
-        logger.info("agent_stop run_id=%s round_index=%s stop_reason=max_steps reached", run_id, state.round_index)
-        return AgentServiceResult(state=state, decision_trace=trace)
+        Replay deliberately compiles a paused graph, regardless of the
+        caller's normal run preference.  LangGraph resumes at the selected
+        checkpoint, executes the pending decision/action pair when needed,
+        persists that action's state, and interrupts before routing onward.
+        """
+        configure_logging(run_id)
+        config = {"configurable": {"thread_id": run_id, "checkpoint_id": checkpoint_id}}
+        limits = self.limits.model_copy(update={"max_steps": self.max_steps or self.limits.max_steps})
+        with SqliteSaver.from_conn_string(str(self.checkpoint_path)) as saver:
+            # A replay is always single-step.  Do not use the caller's
+            # ``pause_after_action`` value here: the frontend's replay
+            # control must never start a complete workflow branch.
+            graph = self._build_graph(saver, limits=limits, pause_after_action=True)
+            snapshot = graph.get_state(config)
+            if _checkpoint_id(snapshot) != checkpoint_id:
+                raise KeyError(f"No checkpoint {checkpoint_id!r} exists for run_id={run_id!r}")
+            result = graph.invoke(None, config)
+            latest = graph.get_state({"configurable": {"thread_id": run_id}})
+            return _result_from_graph(result, run_id, checkpoint_id=_checkpoint_id(latest),
+                                      interrupted=bool(latest.next))
 
-    @staticmethod
-    def _state_summary(state: AgentState) -> dict[str, Any]:
-        return {
-            "round_index": state.round_index,
-            "stop_reason": state.stop_reason,
-            "candidate_sources": len(state.candidate_sources),
-            "selected_sources": len(state.selected_sources),
-            "acquired_pages": len(state.acquired_pages),
-            "job_detail_pages": len(state.job_detail_pages),
-            "prepared_jobs": len(state.prepared_jobs),
-            "understanding_records": len(state.understanding_records),
-            "match_assessments": len(state.match_assessments),
-            "errors": len(state.errors),
-        }
+    def _build_graph(self, saver: SqliteSaver, *, limits: AgentLimits,
+                     pause_after_action: bool = False):
+        return build_agent_graph(controller=self.controller, executor=self.executor, limits=limits,
+                                 action_runner=execute_action, checkpointer=saver,
+                                 pause_after_action=pause_after_action,
+                                 persistence_service=self.persistence_service)
 
 
-def create_rule_based_real_agent_service(
-    *,
-    db_path: Path = DEFAULT_DB_PATH,
-    limits: AgentLimits | None = None,
-) -> AgentService:
-    """Build the Streamlit runtime with a rule-based controller.
-
-    The existing ingestion service remains the owner of real-tool wiring;
-    this adapter only reuses that wiring and does not call its pipeline.
-    """
-
-    from job_radar.services.ingestion import IngestionService
-
-    ingestion_service = IngestionService(db_path=db_path)
-    executor = ingestion_service._create_real_tool_executor(  # noqa: SLF001
-        ingestion_service._real_run_metadata(),  # noqa: SLF001
-    )
-    return AgentService(
-        controller=RuleBasedController(),
-        executor=executor,
-        limits=limits or AgentLimits(),
+def _result_from_graph(result: dict[str, object], run_id: str, *, checkpoint_id: str | None = None,
+                       interrupted: bool = False) -> AgentServiceResult:
+    state = result["agent_state"]
+    return AgentServiceResult(
+        state=state if isinstance(state, AgentState) else AgentState.model_validate(state),
+        decision_trace=[DecisionTraceEntry.model_validate(item) for item in result.get("decision_trace", [])],
+        run_id=run_id,
+        checkpoint_id=checkpoint_id,
+        interrupted=interrupted or bool(result.get("__interrupt__")),
     )
 
 
-__all__ = ["AgentService", "AgentServiceResult", "DecisionTraceEntry", "create_rule_based_real_agent_service"]
+def _checkpoint_id(snapshot: StateSnapshot) -> str | None:
+    return snapshot.config.get("configurable", {}).get("checkpoint_id")
+
+
+def _history_entry(snapshot: StateSnapshot, run_id: str) -> CheckpointHistoryEntry:
+    values = snapshot.values if isinstance(snapshot.values, dict) else {}
+    parent = snapshot.parent_config or {}
+    parent_checkpoint_id = parent.get("configurable", {}).get("checkpoint_id")
+    return CheckpointHistoryEntry(
+        run_id=run_id,
+        checkpoint_id=_checkpoint_id(snapshot) or "",
+        parent_checkpoint_id=parent_checkpoint_id,
+        created_at=snapshot.created_at,
+        next_nodes=list(snapshot.next),
+        state=values.get("agent_state", AgentState()),
+    )
+
+
+def create_rule_based_real_agent_service(*, db_path: Path = DEFAULT_DB_PATH,
+                                         limits: AgentLimits | None = None) -> AgentService:
+    runtime = create_real_agent_runtime()
+    return AgentService(controller=RuleBasedController(), executor=runtime.executor,
+                        limits=limits or AgentLimits(),
+                        persistence_service=JobPersistenceService(db_path))
+
+
+__all__ = ["AgentService", "AgentServiceResult", "CheckpointHistoryEntry", "DecisionTraceEntry",
+           "create_rule_based_real_agent_service"]

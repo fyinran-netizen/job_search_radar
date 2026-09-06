@@ -6,7 +6,8 @@ from abc import ABC, abstractmethod
 
 from pydantic import BaseModel, Field, model_validator
 
-from job_radar.agent.actions import AgentAction, AgentActionName, available_actions as get_available_actions
+from job_radar.agent.actions import AgentAction, available_actions as get_available_actions
+from job_radar.agent.action_names import AgentActionName
 from job_radar.agent.models import AgentLimits, AgentState
 from job_radar.profile.models import UserProfile
 

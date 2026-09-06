@@ -3,10 +3,8 @@
 import re
 from dataclasses import dataclass, field
 
-from job_radar.tools.job_extraction.models import (
-    JobRecord,
-    RawJobRecord,
-)
+from job_radar.tools.page_analysis.models import AIPageInput
+from job_radar.tools.job_extraction.models import JobRecord, RawJobRecord
 
 
 @dataclass

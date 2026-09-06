@@ -24,7 +24,7 @@ RawJobRecord
 
 ## 1. Mock Agent Pipeline
 
-The mock agent path is the future AI-agent shape. In tests and default service construction it does not call a real LLM and does not access the network. In the Streamlit app, it may use the active user's local Codex CLI login to generate only the `SearchPlan`; mock search and mock page acquisition still do not make real web requests.
+The mock agent path is the LangGraph agent shape. In tests and default service construction it does not call a real LLM and does not access the network; search plans use the deterministic builder. Mock search and mock page acquisition still do not make real web requests.
 
 It uses:
 
@@ -146,12 +146,12 @@ This lets the project test the real page-fetching and backend structuring bounda
 
 ## 3. Real Search Pipeline
 
-The real search path is the current end-to-end experiment. It uses Codex CLI for bounded web search, Python HTTP collection, deterministic technical page routing, AI semantic page routing, AI extraction, deterministic job preparation, AI job understanding, and AI/rule-based match analysis.
+The real search path is the current end-to-end experiment. It uses Tavily for bounded web search, Python HTTP collection, deterministic technical page routing, Ollama semantic page routing, extraction, job understanding, and match analysis.
 
 ```text
 UserProfile
 -> SearchPlan
--> CodexWebSearchTool
+-> TavilyWebSearchTool
 -> CandidateSource[]
 -> HttpPageTool
 -> PageFilterTool

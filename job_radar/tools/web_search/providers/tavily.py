@@ -12,6 +12,7 @@ from pydantic import BaseModel, TypeAdapter
 
 from job_radar.tools.base import BaseTool
 from job_radar.tools.web_search.models import CandidateSource, SearchPlan
+from job_radar.tools.web_search.source_selection import normalize_url
 
 
 class TavilyWebSearchTool(BaseTool):
@@ -31,19 +32,30 @@ class TavilyWebSearchTool(BaseTool):
 
         sources: list[CandidateSource] = []
         seen_urls: set[str] = set()
-        for query in plan.queries:
-            if len(sources) >= self.max_sources:
-                break
-            results = self._search(api_key, query, self.max_sources - len(sources))
+        quotas = self._query_quotas(len(plan.queries))
+        for query, quota in zip(plan.queries, quotas):
+            if quota <= 0:
+                continue
+            results = self._search(api_key, query, quota)
             for item in results:
                 source = self._to_candidate_source(item, query)
-                if source is None or source.url in seen_urls:
+                if source is None:
                     continue
+                normalized_url = normalize_url(source.url)
+                if normalized_url in seen_urls:
+                    continue
+                seen_urls.add(normalized_url)
                 sources.append(source)
-                seen_urls.add(source.url)
                 if len(sources) >= self.max_sources:
                     break
         return sources
+
+    def _query_quotas(self, query_count: int) -> list[int]:
+        """Split the source budget as evenly as possible across queries."""
+        if query_count <= 0 or self.max_sources <= 0:
+            return [0] * query_count
+        base, remainder = divmod(self.max_sources, query_count)
+        return [base + int(index < remainder) for index in range(query_count)]
 
     def _search(self, api_key: str, query: str, max_results: int) -> list[dict[str, Any]]:
         body = json.dumps({

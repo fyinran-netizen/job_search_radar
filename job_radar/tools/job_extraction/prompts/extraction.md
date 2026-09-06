@@ -1,31 +1,30 @@
 ---
 name: job-extraction
-description: Extract compact semantic job data from cleaned page text. Use when Codex needs to identify company, recruitment context, dates, and per-job details while deterministic code separately preserves URLs, typed links, source provenance, and official-source status before RawJobRecord expansion.
+description: Extract the primary job and its recruitment context from a page already classified as a job-detail page.
 ---
 
 # Job Extraction
 
 ## Purpose
 
-Extract compact job data from collected page content.
+Extract structured data for the primary job represented by the current page.
 
-Return shared recruitment semantics once in `page_context` and variable position data in `jobs`. Do not process links or source provenance; deterministic code joins those fields by `page_id` before validation.
+The page has already been classified as `job_detail`, so return at most one job.
+
+Use semantic understanding of the page as a whole. The page title, main job heading, and main JD content are the strongest evidence. Ignore surrounding content that does not belong to the primary job.
 
 ## Input
 
-Use only the semantic page payload:
+Use only:
 
 - `page_id`
 - `title`
 - `visible_text`
 
-Treat `page_id` as an opaque identifier and return it unchanged. Do not request or infer URLs, typed links, source names, company type, source-selection metadata, or official-source status.
+Return `page_id` unchanged.
 
 ## Output
 
-For one input page, return one JSON object:
-
-```json
 {
   "page_id": "page-1",
   "page_context": {
@@ -49,37 +48,45 @@ For one input page, return one JSON object:
     }
   ]
 }
-```
 
 For multiple input pages, return a JSON array containing one such object per page.
 
-## Extraction Rules
+Return at most one item in `jobs` for each page.
 
-1. Return the input `page_id` exactly.
-2. Scan the complete page for every explicitly named position or job category before constructing `jobs`.
-3. Return every named position even when its location, description, or requirements are missing. Missing fields are not a reason to omit a job.
-4. Treat numbered or bulleted entries under headings such as recruitment positions, open roles, or job categories as separate jobs when each entry has a distinct position name.
-5. Exclude organization-only headings or generic statements that do not name a position.
-6. Put fields shared by all positions on the page only in `page_context`.
-7. Put `title`, `location`, `description`, and `requirements` for each distinct position in `jobs`.
-8. Combine multiple locations for the same position into one location string; do not create one job per city.
-9. Extract explicit candidate conditions such as graduate eligibility, degree, major, language, and skill requirements into `requirements`.
-10. Preserve source wording for recruitment type and other raw text; do not translate or normalize values.
-11. Treat graduation eligibility, recruitment or program labeling, application dates, and start or onboarding dates as separate semantic facts. Do not infer one from another.
-12. Put only explicit candidate graduation eligibility years in `graduation_years`. Preserve the supporting source wording in `graduation_requirement`.
-13. Put explicit candidate graduation eligibility date bounds in `graduation_start` and `graduation_end` when the page states a concrete window. Use `YYYY-MM` for month precision and `YYYY-MM-DD` for day precision.
-14. Put explicit role, internship, onboarding, joining, or program start timing in `start_date` and preserve the source wording in `start_date_text`. Do not copy start timing into graduation eligibility fields.
-15. Leave scalar date fields `null` and `graduation_years` empty when the source wording is not explicit enough to classify the date semantics.
-16. Return `null` for unsupported scalar fields and `[]` for missing graduation years; do not guess.
-17. Keep dates in ISO 8601 format when possible.
+## Extraction Principles
 
-Before returning JSON, compare `jobs` against all named positions found in the full page and add any omitted position. Do not output this coverage check.
+- Extract only facts that belong to the primary job.
+- Use the page title, main job heading, and main JD content as the strongest evidence for identifying the primary role.
+- `company_name` means the actual hiring organization for the primary job. Distinguish it from recruiting agencies, job platforms, unrelated organizations, and interface or navigation text.
+- If the employer identity or any other field is ambiguous, undisclosed, or unsupported by the page, return `null` rather than guessing.
+- Extract only information that semantically belongs to the primary job. Ignore surrounding content that belongs to other roles or general page structure.
+- Keep job responsibilities, candidate requirements, recruitment context, graduation eligibility, dates, and locations semantically distinct.
+- Preserve explicit source meaning and do not infer unsupported facts.
+- Return at most one primary job for each page.
+
+## Field Semantics
+
+- `title`: the primary advertised position.
+- `location`: the location or locations of the primary job.
+- `description`: the responsibilities, work content, or scope of the primary job.
+- `requirements`: explicit candidate requirements such as education, major, experience, technical skills, language, or eligibility.
+- `company_name`: the actual hiring organization when clearly supported by the page.
+- `recruitment_type`: the explicitly stated recruitment or employment type.
+- `graduation_years`: explicit candidate graduation eligibility years only.
+- `graduation_start` and `graduation_end`: explicit graduation eligibility date bounds.
+- `graduation_requirement`: source wording describing graduation eligibility.
+- `start_date` and `start_date_text`: explicit role, internship, onboarding, joining, or program start timing.
+- `published_at`: explicit publication date of the job or recruitment notice.
+- `deadline`: explicit application closing date or deadline.
+
+Use ISO 8601 date formats when the source provides enough precision.
+
+Return `null` for unsupported scalar fields and `[]` for missing graduation years.
 
 ## Constraints
 
-- Do not output URLs, links, source names, company type, or official-source status.
-- Do not repeat page-level fields inside every job.
-- Do not reject jobs here; validation happens after deterministic expansion.
-- Do not normalize, deduplicate, match, rank, or persist jobs.
+- Do not output URLs, links, source names, company type, official-source status, or other provenance fields handled deterministically outside this task.
+- Do not reject jobs here. Validation happens after deterministic expansion.
+- Do not normalize, deduplicate, rank, match, validate, or persist jobs.
 - Do not overwrite user status or notes.
-- Return only JSON when called by `ai/tasks`.
+- Return JSON only when called by `ai/tasks`.

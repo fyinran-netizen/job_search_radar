@@ -5,6 +5,44 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+class ImportantLink(BaseModel):
+    """Relevant link preserved as prepared page context."""
+
+    url: str
+    text: str = ""
+    kind: Literal["attachment", "apply", "source", "other"] = "other"
+    reason: str = ""
+
+
+class AIPageInput(BaseModel):
+    """Prepared page representation consumed by classification and extraction."""
+
+    url: str
+    final_url: str | None = None
+    source_name: str | None = None
+    source_company_name: str | None = None
+    company_type: str | None = None
+    source_location: str | None = None
+    is_official: bool = False
+    title: str
+    visible_text: str
+    important_links: list[ImportantLink] = Field(default_factory=list)
+
+
+class PageAnalysisTrace(BaseModel):
+    """Auditable preparation and semantic-classification input for one page."""
+
+    url: str
+    cleaning_method: str | None = None
+    original_chars: int = 0
+    cleaned_chars: int = 0
+    removed_line_count: int = 0
+    truncated: bool = False
+    classification_text: str = ""
+    classification_text_length: int = 0
+    classification_truncated: bool = False
+
+
 PageSemanticType = Literal[
     "job_detail",
     "job_listing",

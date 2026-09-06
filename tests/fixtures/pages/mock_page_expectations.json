@@ -1,8 +1,9 @@
 {
-  "collected_count": 2,
+  "collected_count": 3,
   "page_urls": [
     "mock://future-bank/campus",
-    "mock://global-tech/graduates"
+    "mock://global-tech/graduates",
+    "mock://unrelated-forum/thread"
   ],
   "content_source": "job_radar.tools.page_acquisition.mock.MOCK_PAGES"
 }

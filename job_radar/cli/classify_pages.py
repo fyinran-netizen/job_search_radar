@@ -12,7 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from job_radar.config import load_runtime_settings
 from job_radar.infra.llm.ollama import OllamaProvider
-from job_radar.tools.job_extraction.models import AIPageInput
+from job_radar.tools.page_analysis.models import AIPageInput
 from job_radar.tools.page_analysis.semantic_classification import (
     PageSemanticClassification,
     PageSemanticClassifier,

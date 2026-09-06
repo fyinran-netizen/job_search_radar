@@ -54,6 +54,21 @@ class ScoringRubric(BaseModel):
     evidence_source_clarity: int = 10
 
 
+class MatchingRules(BaseModel):
+    """Transparent matching configuration owned by match analysis."""
+
+    title_keywords: list[str] = Field(default_factory=list)
+    skill_keywords: list[str] = Field(default_factory=list)
+    weights: dict[str, int] = Field(
+        default_factory=lambda: {
+            "title": 35,
+            "skill": 30,
+            "company_type": 15,
+            "location": 20,
+        }
+    )
+
+
 DeterministicMatchResult = BasicGateResult
 
 

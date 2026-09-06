@@ -44,7 +44,6 @@ job_search_radar/
 |   |   |-- providers/
 |   |   |   |-- __init__.py
 |   |   |   |-- base.py
-|   |   |   |-- codex_cli.py
 |   |   |   `-- mock.py
 |   |   `-- tasks/
 |   |       |-- __init__.py
@@ -108,13 +107,13 @@ job_search_radar/
 
 ## Responsibility Boundaries
 
-`.agents/skills/` contains Codex-style skill instructions. These files define how AI should think and what JSON it should return. They are prompt assets, not Python business logic.
+Runtime prompt assets live with their owning tools under `job_radar/tools/*/prompts/`. They define the task instructions and expected JSON shape, not business logic.
 
 `job_radar/tools/search_plan/` contains the deterministic `build_search_plan` Agent Tool and shared `SearchPlanBuilderProtocol`. Future optional builders can implement the Protocol without changing the tool or provider boundaries.
 
 `job_radar/profile/` contains deterministic profile checks. Profile completeness is a Python required-field gate, not an AI decision.
 
-`job_radar/ai/providers/` contains low-level AI providers. `CodexCliProvider` only runs `codex exec` and parses JSON. It must not contain job-search business rules.
+`job_radar/infra/llm/` contains the low-level Ollama provider, structured-output validation, and runtime prompt helpers. It must not contain job-search business rules.
 
 `job_radar/agent/` owns workflow control: orchestration, state, transitions, limits, and guardrails. It decides when to call tasks, tools, and extractors, but it does not fetch pages directly or write to storage.
 
@@ -122,13 +121,13 @@ job_search_radar/
 
 `job_radar/extractors/` owns the boundary from `PageDocument` to `RawJobRecord`. `RuleBasedJobExtractor` is the current implementation and fallback. `LLMJobExtractor` is the adapter for future AI-backed extraction.
 
-`job_radar/pipeline/` contains deterministic data processing only: validation, normalization, deduplication, matching, and runner orchestration. It does not call Codex, web search, or Streamlit.
+`job_radar/pipeline/` contains deterministic data processing only: validation, normalization, deduplication, matching, and runner orchestration. It does not call an LLM, web search, or Streamlit.
 
 `job_radar/storage/` owns SQLite schema and repository methods. User-managed fields such as status and notes must be preserved on re-import.
 
 `job_radar/services/` exposes use cases to UI and tests. It wires profile config, tools, agent orchestration, pipeline runner, and repository.
 
-`app.py` is the Streamlit entry point. It should call services and never execute SQL or Codex directly.
+`app.py` is the Streamlit entry point. It should call services and never execute SQL or provider calls directly.
 
 ## Removed Overlap
 
@@ -136,7 +135,7 @@ The old `collectors/`, plural `agents/`, and `llm/` packages were removed to avo
 
 - Agent flow control is now `agent/orchestrator.py`.
 - Profile/search decisions are now `ai/tasks/`.
-- Codex or model invocation belongs in `ai/providers/`.
+- Ollama/model invocation belongs in `infra/llm/`.
 
 This keeps each module focused on one question:
 

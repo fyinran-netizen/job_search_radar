@@ -1,77 +1,67 @@
-# Job Radar Agent Notes
+# Job Radar Development Guide
 
-## Project Goal
-Job Radar is a local-first job discovery, matching, and application tracking tool. The current phase proves the architecture and end-to-end demo pipeline; it is not a real recruitment crawler yet.
+## Project Purpose
 
-The long-term workflow should align with `docs/job_search_agent_full_flow.svg`: program controls the workflow, AI returns structured decisions, tools execute bounded actions, and deterministic code validates, normalizes, deduplicates, persists, and protects user state.
+Job Radar is a local-first job discovery, matching, and application-tracking tool.
 
-## Tech Stack
-- Python 3.11+
-- uv for dependency management
-- Streamlit for the local UI
-- SQLite for persistence
-- pandas for CSV/table handling
-- Pydantic for models
-- PyYAML for configuration
-- pytest for tests
+The program controls workflow and state. AI components return structured decisions, tools perform bounded external actions, and deterministic Python code validates outputs before execution or persistence.
 
-## Current Pipeline
-`Tool/Extractor -> RawJobRecord -> Validation -> Normalization -> Deduplication -> Matching -> Repository -> Service -> Streamlit`
+## Architecture Rules
 
-Invalid single records must be reported without failing the whole run.
+* Profile completeness is checked by deterministic Python code.
+* AI decisions must use Pydantic-validated structured outputs.
+* Controllers decide the next action but must not directly perform tool work or mutate persistent state.
+* External actions must go through `ToolExecutor`.
+* Validate actions before execution and validate tool or AI outputs before persistence.
+* Preserve source URLs throughout collection, extraction, and storage.
+* Invalid individual records must be reported without failing the entire run.
+* Keep deterministic fallbacks for AI-backed behavior.
+* Tests and mock workflows must not access the network or call real LLM APIs.
 
-The default/test mock agent pipeline uses deterministic `ProfileCompletenessChecker`, deterministic `SearchPlanBuilder`, `ToolExecutor`, `MockWebSearchTool`, `MockPageTool`, `RuleBasedJobExtractor`, and `JobDiscoveryAgent`. It must not make network requests or call a real LLM API.
+## Module Responsibilities
 
-The Streamlit mock-agent entry may use `AutoSearchPlanBuilder` to generate only the `SearchPlan` through the active user's local Codex CLI login, then fall back to deterministic `SearchPlanBuilder` when Codex is unavailable. This must not replace tool execution guardrails or make real search/page requests in the mock path.
+* `agent/`: agent state, controllers, actions, limits, planning, and orchestration.
+* `ai/tasks/`: job-search-specific AI decisions and deterministic fallbacks.
+* `ai/providers/`: model/provider adapters without business logic.
+* `tools/`: bounded external capabilities and tool execution.
+* `extractors/`: conversion of page content into structured job records.
+* `pipeline/`: validation, normalization, deduplication, and matching.
+* `storage/`: SQLite schema and parameterized repository operations.
+* `services/`: application use cases used by the UI.
+* `app.py`: Streamlit presentation only; no direct SQL or provider logic.
 
-The manual URL pipeline uses `ManualSourceTool`, `HttpPageTool`, `RuleBasedJobExtractor`, and `JobDiscoveryAgent`. It may fetch explicitly configured JD URLs from `config/sources.yaml` or `config/sources.example.yaml`, but it must not perform automatic search, broad crawling, Playwright automation, or LLM API calls in the current phase.
+## External Access
 
-Current code is the deterministic core and first tool-execution slice of the target SVG. Future work should add an orchestrator and structured AI decision models around this core, not bypass it.
-
-## Target Agent Direction
-- AI should return Pydantic-validated JSON decisions such as `CandidateProfileDecision`, `SearchStrategy`, `ToolPlan`, `JobUnderstanding`, `MatchAssessment`, and `ContinueDecision`.
-- Profile completeness is a deterministic Python gate, not an AI decision. AI may extract candidate profile fields from files or user notes, but required-field sufficiency is checked by code before search strategy generation.
-- The orchestrator should validate each AI decision before executing tools or mutating state.
-- Tool calls should go through `ToolExecutor`.
-- `RuleBasedJobExtractor` is a current mock/fallback. Varied real pages should eventually use `LLMJobExtractor(real_client)` plus validation.
-- Search should become iterative only after round limits, budget limits, privacy rules, and run logging are explicit.
-
-## Module Boundaries
-- `.agents/skills/`: prompt rules and examples for Codex-style AI tasks.
-- `agent/`: coordinate profile checks, search planning, tool calls, source selection, state, limits, and extraction.
-- `ai/tasks/`: business-specific AI decisions. Keep AI-backed implementations optional and preserve deterministic fallbacks.
-- `ai/providers/`: provider adapters such as Codex CLI and mock provider. Providers must not contain job-search business logic.
-- `extractors/`: convert page text into `RawJobRecord` objects. Current runtime uses `RuleBasedJobExtractor`; future LLM extraction should plug in through `LLMJobExtractor`.
-- `tools/`: define tool interfaces, scheduling, mock external tools, manual source loading, and HTTP page collection.
-- `pipeline/`: validation, normalization, deduplication, matching, and orchestration.
-- `storage/`: SQLite schema and repository methods only.
-- `services/`: application-level use cases consumed by the UI.
-- `app.py`: Streamlit presentation only; no direct SQL.
+* Keep search, page collection, and model calls explicitly configured.
+* Enforce round, result, and budget limits before adding iterative behavior.
+* Do not add automated job applications, login automation, or broad unrestricted crawling.
+* Dynamic-page collection must remain bounded and callable through the tool layer.
 
 ## Code Style
-- Use type annotations and pathlib.
-- Use parameterized SQL.
-- Keep modules small and purposeful.
-- Avoid adding empty placeholder interfaces.
-- Dates are ISO 8601 strings.
 
-## Tests
-After changes, run:
+* Use Python type annotations and `pathlib`.
+* Use Pydantic models for structured boundaries.
+* Use parameterized SQL.
+* Keep modules small and purposeful.
+* Avoid empty placeholder abstractions.
+* Store dates as ISO 8601 strings.
+
+## Privacy
+
+Never commit real names, email addresses, phone numbers, resumes, private notes, personal configuration, local databases, credentials, or real application history.
+
+## Verification
+
+Run the full test suite after changes:
 
 ```bash
 uv run pytest
 ```
 
-For UI startup checks, run:
+For Streamlit startup checks:
 
 ```bash
 uv run streamlit run app.py
 ```
 
-## Adding Tools
-New tools should return structured Pydantic models or dictionaries, preserve source URLs, and avoid collecting personal data. Do not add real web crawling, Playwright, login flows, or automated application behavior in this phase.
-
-New tools should be callable through `ToolExecutor`. Automatic web search and broad collection should be added only after guardrails, limits, and run logging are explicit.
-
-## Privacy
-Never commit real names, emails, phone numbers, resumes, private notes, personal configs, local databases, or real application history.
+Architecture details and the long-term workflow belong in `docs/`, including `docs/job_search_agent_full_flow.svg`.

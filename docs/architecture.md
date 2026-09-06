@@ -114,7 +114,7 @@ This keeps UI, workflow control, tools, deterministic processing, and storage se
 - Pydantic gives explicit raw and processed job models.
 - PyYAML keeps profile and matching rules outside business code.
 - pytest verifies the pipeline and repository without using the real database.
-- The mock agent path uses mock web tools and deterministic rule-based extraction so tool scheduling can be tested without network access. In the Streamlit app, search-plan generation can use the active user's local Codex CLI login before falling back to deterministic rules.
+- The mock agent path uses mock web tools and deterministic rule-based extraction so tool scheduling can be tested without network access. Search-plan generation uses the deterministic builder.
 - The manual URL path can fetch explicitly configured JD URLs with Python stdlib HTTP collection, but it does not discover URLs automatically.
 
 ## Agent And Tool Layer

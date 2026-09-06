@@ -6,5 +6,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = PROJECT_ROOT / "config"
 DATA_DIR = PROJECT_ROOT / "data"
 DEFAULT_DB_PATH = DATA_DIR / "jobs.db"
+DEFAULT_CHECKPOINT_DB_PATH = DATA_DIR / "agent_checkpoints.db"
 
 

@@ -1,5 +1,7 @@
 """Configuration loading helpers and runtime settings."""
 
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,7 +10,11 @@ from typing import Any
 import yaml
 
 from job_radar.infra.paths import CONFIG_DIR
-from job_radar.profile.models import MatchingRules, UserProfile
+from job_radar.profile.models import UserProfile
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from job_radar.tools.match_analysis.models import MatchingRules
 
 
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
@@ -16,9 +22,8 @@ ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 
 @dataclass(frozen=True)
 class LLMTaskSettings:
-    """Provider/model/timeout settings for one model-backed task."""
+    """Model/timeout settings for one Ollama-backed task."""
 
-    provider: str
     model: str
     timeout_seconds: int
 
@@ -63,10 +68,6 @@ def load_runtime_settings() -> RuntimeSettings:
     return RuntimeSettings(
         ollama_base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
         analyze_page=LLMTaskSettings(
-            provider=os.environ.get(
-                "JOB_RADAR_PAGE_ANALYSIS_PROVIDER",
-                "ollama",
-            ),
             model=os.environ.get(
                 "JOB_RADAR_PAGE_ANALYSIS_MODEL",
                 "gpt-oss:20b-cloud",
@@ -74,7 +75,6 @@ def load_runtime_settings() -> RuntimeSettings:
             timeout_seconds=_env_int("JOB_RADAR_PAGE_ANALYSIS_TIMEOUT_SECONDS", 90),
         ),
         extraction=LLMTaskSettings(
-            provider=os.environ.get("JOB_RADAR_EXTRACTION_PROVIDER", "ollama"),
             model=os.environ.get(
                 "JOB_RADAR_EXTRACTION_MODEL",
                 os.environ.get("JOB_RADAR_EXTRACTION_OLLAMA_MODEL", "gpt-oss:20b-cloud"),
@@ -82,7 +82,6 @@ def load_runtime_settings() -> RuntimeSettings:
             timeout_seconds=_env_int("JOB_RADAR_EXTRACTION_TIMEOUT_SECONDS", 240),
         ),
         understanding=LLMTaskSettings(
-            provider=os.environ.get("JOB_RADAR_UNDERSTANDING_PROVIDER", "ollama"),
             model=os.environ.get(
                 "JOB_RADAR_UNDERSTANDING_MODEL",
                 os.environ.get("JOB_RADAR_UNDERSTANDING_OLLAMA_MODEL", "gpt-oss:20b-cloud"),
@@ -90,7 +89,6 @@ def load_runtime_settings() -> RuntimeSettings:
             timeout_seconds=_env_int("JOB_RADAR_UNDERSTANDING_TIMEOUT_SECONDS", 180),
         ),
         match=LLMTaskSettings(
-            provider=os.environ.get("JOB_RADAR_MATCH_PROVIDER", "ollama"),
             model=os.environ.get(
                 "JOB_RADAR_MATCH_MODEL",
                 os.environ.get("JOB_RADAR_MATCH_OLLAMA_MODEL", "gpt-oss:20b-cloud"),
@@ -125,6 +123,8 @@ def load_profile(config_dir: Path = CONFIG_DIR) -> tuple[UserProfile, bool, Path
 
 def load_matching_rules(config_dir: Path = CONFIG_DIR) -> tuple[MatchingRules, bool, Path]:
     """Load matching rules, returning whether the example was used."""
+
+    from job_radar.tools.match_analysis.models import MatchingRules
 
     path, used_example = resolve_config_path("matching_rules", config_dir)
     return MatchingRules.model_validate(load_yaml(path)), used_example, path

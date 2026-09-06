@@ -2,21 +2,22 @@
 
 from __future__ import annotations
 
-from typing import Iterable
+import re
 
 from pydantic import ValidationError
 import streamlit as st
 
 from job_radar.config import load_profile
-from job_radar.agent.models import AgentRunResult
 from job_radar.services.agent_service import (
     AgentService,
     AgentServiceResult,
+    CheckpointHistoryEntry,
     create_rule_based_real_agent_service,
 )
 from job_radar.tools.job_extraction.models import APPLICATION_STATUSES
 from job_radar.profile.models import UserProfile
 from job_radar.frontend.job_service import JobService
+from job_radar.frontend.view_models import checkpoint_history_rows
 from job_radar.infra.paths import CONFIG_DIR, DEFAULT_DB_PATH
 
 EDUCATION_OPTIONS = [
@@ -99,6 +100,7 @@ def render_app() -> None:
         if st.button("Run mock agent search", icon=":material/bug_report:"):
             st.info("The agent runtime is configured for the RuleBasedController; use the profile form to run it.")
 
+    render_checkpoint_debug(agent_service)
     render_jobs(job_service)
 
 
@@ -106,6 +108,12 @@ def render_profile_form(default_profile: UserProfile) -> UserProfile | None:
     """Render the real-search profile form and return a validated profile on submit."""
 
     st.subheader("Real search")
+    st.checkbox(
+        "单步调试",
+        value=True,
+        key="pause_after_action",
+        help="每执行一个 action 后暂停，点击调试区域中的按钮继续。",
+    )
     with st.form("real_search_profile"):
         education_options = _option_pool(EDUCATION_OPTIONS, [default_profile.education])
         education = st.selectbox(
@@ -151,7 +159,7 @@ def render_profile_form(default_profile: UserProfile) -> UserProfile | None:
         return None
 
     try:
-        return UserProfile.model_validate(
+        return UserProfile.from_form_data(
             {
                 "education": education,
                 "graduation_date": graduation_date,
@@ -173,14 +181,22 @@ def run_agent_pipeline(agent_service: AgentService, profile: UserProfile) -> Non
 
     try:
         with st.spinner("Running real search..."):
-            result = agent_service.run(profile)
+            result = agent_service.run(
+                profile,
+                pause_after_action=bool(st.session_state.get("pause_after_action", True)),
+            )
     except Exception as exc:
         st.error("Real search failed.")
         st.exception(exc)
         return
 
+    st.session_state["agent_service_result"] = result
+    st.session_state["agent_run_id"] = result.run_id
     render_agent_service_result(result)
-    st.success("Rule-based agent search finished.")
+    if result.interrupted:
+        st.info("工作流已暂停，请在 Checkpoint debugging 区域执行下一个 action。")
+    else:
+        st.success("Rule-based agent search finished.")
 
 
 def render_agent_service_result(result: AgentServiceResult) -> None:
@@ -191,6 +207,150 @@ def render_agent_service_result(result: AgentServiceResult) -> None:
         "Decision trace",
         [entry.model_dump() for entry in result.decision_trace],
     )
+
+
+def render_checkpoint_debug(agent_service: AgentService) -> None:
+    """Render checkpoint loading, inspection, resume, and replay controls."""
+
+    result = st.session_state.get("agent_service_result")
+    current_run_id = st.session_state.get("agent_run_id")
+    if not isinstance(current_run_id, str):
+        current_run_id = result.run_id if isinstance(result, AgentServiceResult) else None
+
+    with st.expander("Checkpoint debugging"):
+        loaded_run_id = st.text_input(
+            "Load existing run",
+            value=current_run_id or "",
+            key="checkpoint_run_id_input",
+            placeholder="Enter run_id",
+        ).strip()
+        if st.button("Load run", key="load_checkpoint_run"):
+            if not _valid_run_id(loaded_run_id):
+                st.error("Invalid run_id format.")
+                return
+            try:
+                loaded_history = agent_service.state_history(loaded_run_id)
+            except Exception as exc:
+                st.error("Unable to load run history.")
+                st.exception(exc)
+                return
+            if not loaded_history:
+                st.error(f"No checkpoints found for run_id `{loaded_run_id}`.")
+                return
+            st.session_state["agent_run_id"] = loaded_run_id
+            current_run_id = loaded_run_id
+
+        if not current_run_id:
+            st.info("Run a search or enter an existing run_id to inspect checkpoints.")
+            return
+
+        st.caption(f"run_id: `{current_run_id}`")
+        try:
+            history = agent_service.state_history(current_run_id)
+        except Exception as exc:
+            st.error("Unable to read checkpoint history.")
+            st.exception(exc)
+            return
+
+        if not history:
+            st.error(f"No checkpoints found for run_id `{current_run_id}`.")
+            return
+
+        latest_entry = history[0]
+        st.caption(f"checkpoint_id: `{latest_entry.checkpoint_id or '(none)'}`")
+        st.write("AgentState.errors", _json_value(latest_entry.state.errors))
+        can_resume = bool(latest_entry.next_nodes)
+        if can_resume and st.button("\u6267\u884c\u4e0b\u4e00\u4e2a action", key="resume_agent_action"):
+            try:
+                resumed = agent_service.resume(current_run_id, pause_after_action=True)
+                st.session_state["agent_service_result"] = resumed
+                st.session_state["agent_run_id"] = current_run_id
+                st.rerun()
+            except Exception as exc:
+                st.error("\u6267\u884c\u4e0b\u4e00\u4e2a action \u5931\u8d25\u3002")
+                st.exception(exc)
+        if isinstance(result, AgentServiceResult) and result.run_id == current_run_id:
+            st.write("Latest result", result.state.model_dump(mode="json"))
+        st.dataframe(checkpoint_history_rows(history), hide_index=True, width="stretch")
+        checkpoint_ids = [entry.checkpoint_id for entry in history]
+        selected_for_view = st.selectbox(
+            "View checkpoint",
+            checkpoint_ids,
+            index=0,
+            format_func=lambda value: f"{value[:12]}...",
+            key="view_checkpoint",
+        )
+        viewed_entry = next(entry for entry in history if entry.checkpoint_id == selected_for_view)
+        _render_checkpoint_state(viewed_entry)
+
+        selected_for_replay = st.selectbox(
+            "Replay next action",
+            checkpoint_ids,
+            index=0,
+            format_func=lambda value: f"{value[:12]}...",
+            key="replay_checkpoint_selector",
+        )
+        if st.button("Replay selected checkpoint", key="replay_checkpoint"):
+            try:
+                replayed = agent_service.replay_from_checkpoint(current_run_id, selected_for_replay)
+                st.session_state["agent_service_result"] = replayed
+                st.session_state["agent_run_id"] = current_run_id
+                st.success(f"Replay completed at checkpoint `{replayed.checkpoint_id}`.")
+                st.rerun()
+            except Exception as exc:
+                st.error("Checkpoint replay failed.")
+                st.exception(exc)
+
+
+def _valid_run_id(value: str) -> bool:
+    """Accept generated IDs and safe user-supplied thread IDs."""
+
+    return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", value))
+
+
+def _render_checkpoint_state(entry: CheckpointHistoryEntry) -> None:
+    """Render all useful fields from one immutable checkpoint snapshot."""
+
+    state = entry.state
+    st.caption(f"Viewing checkpoint `{entry.checkpoint_id}` from {entry.created_at or 'unknown time'}")
+    st.json({
+        "round_index": state.round_index,
+        "stop_reason": state.stop_reason,
+        "last_search_outcome": state.last_search_outcome,
+        "notices": state.notices,
+    })
+    with st.expander("search_plan", expanded=True):
+        st.json(state.search_plan.model_dump(mode="json") if state.search_plan else {})
+
+    list_fields = (
+        "query_history", "executed_queries", "search_round_results",
+        "candidate_sources", "selected_sources", "acquired_pages",
+        "job_detail_pages", "pending_followups", "rejected_pages", "page_analysis_traces", "prepared_jobs",
+        "understanding_records", "match_assessments", "errors",
+    )
+    for field_name in list_fields:
+        value = getattr(state, field_name)
+        with st.expander(field_name, expanded=True):
+            if field_name == "search_round_results":
+                st.json(_json_value(value))
+            elif value and isinstance(value[0], dict):
+                st.dataframe(value, hide_index=True, width="stretch")
+            elif value and hasattr(value[0], "model_dump"):
+                st.dataframe([item.model_dump(mode="json") for item in value], hide_index=True, width="stretch")
+            elif value:
+                st.dataframe({field_name: value}, hide_index=True, width="stretch")
+            else:
+                st.info("No data in this checkpoint.")
+
+
+def _json_value(value: object) -> object:
+    if isinstance(value, list):
+        return [_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _json_value(item) for key, item in value.items()}
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    return value
 
 
 def render_jobs(job_service: JobService) -> None:
@@ -245,47 +405,6 @@ def render_jobs(job_service: JobService) -> None:
         mime="text/csv",
         icon=":material/download:",
     )
-
-
-def render_pipeline_result(result: PipelineResult) -> None:
-    """Render common pipeline metrics and errors."""
-
-    cols = st.columns(7)
-    cols[0].metric("Collected", result.collected_count)
-    cols[1].metric("Valid", result.valid_count)
-    cols[2].metric("Invalid", result.invalid_count)
-    cols[3].metric("Duplicates", result.duplicate_count)
-    cols[4].metric("Inserted", result.inserted_count)
-    cols[5].metric("Updated", result.updated_count)
-    cols[6].metric("Failed", result.failed_count)
-    if result.errors:
-        st.error("Some records reported errors.")
-        st.dataframe(result.errors, hide_index=True)
-
-
-def render_agent_result(agent_result: AgentRunResult) -> None:
-    """Render agent decisions and tool trace."""
-
-    if not agent_result.profile_check.is_complete:
-        st.warning("Profile is incomplete.")
-        st.write(agent_result.profile_check.model_dump())
-        return
-
-    with st.container(border=True):
-        st.write("Search plan", agent_result.search_plan.model_dump() if agent_result.search_plan else {})
-        st.write("Selected sources", [source.model_dump() for source in agent_result.selected_sources])
-        if agent_result.errors:
-            st.error("Some sources could not be collected or extracted.")
-            st.dataframe(agent_result.errors, hide_index=True)
-        if agent_result.tool_events:
-            st.write("Tool events", [event.model_dump() for event in agent_result.tool_events])
-
-
-def render_notices(notices: Iterable[str]) -> None:
-    """Render run notices."""
-
-    for notice in notices:
-        st.info(notice)
 
 
 def _split_items(value: str) -> list[str]:

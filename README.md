@@ -14,7 +14,7 @@ Profile -> Agent Controller -> ToolExecutor -> Page/Job Tools
 
 - Streamlit profile form and persisted job table with editable status and notes.
 - Bounded agent loop with validated `AgentState`, explicit `AgentLimits`, action transitions, and decision tracing.
-- Deterministic `RuleBasedController` for the current baseline, with an `LLMController` boundary available for structured decisions.
+- Deterministic `RuleBasedController` for the current baseline, with a validated controller boundary reserved for future structured decisions.
 - Deterministic profile completeness checks before search planning.
 - Mock web search and mock page acquisition for network-free development and tests.
 - Optional Tavily web search and Python HTTP page acquisition for explicitly configured real searches.
@@ -36,7 +36,6 @@ The mock path must remain deterministic and must not call a real LLM API or make
 - `actions.py`: allowed action names and state transitions.
 - `controllers/`: controller interface plus rule-based and LLM controller implementations.
 - `guardrails.py` and `limits.py`: source selection and run bounds.
-- `search_review.py`: search-round review decisions.
 
 ### Tools and processing
 
@@ -54,7 +53,7 @@ Every tool call goes through `ToolExecutor`, which restricts calls to registered
 ### Infrastructure and application boundaries
 
 - `job_radar/profile/`: profile models, normalization, construction, and completeness checks.
-- `job_radar/infra/llm/`: provider adapters for Codex CLI and Ollama, prompt loading, and structured output validation.
+- `job_radar/infra/llm/`: Ollama, prompt loading, and structured output validation.
 - `job_radar/infra/http/`: HTTP client support.
 - `job_radar/infra/storage/`: SQLite initialization and repository methods.
 - `job_radar/infra/paths.py`: project-relative config and data paths.

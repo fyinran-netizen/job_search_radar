@@ -5,6 +5,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+# Page inputs are owned by page analysis.  These imports remain as a narrow
+# public re-export for serialized/older callers; extraction itself imports
+# them from page_analysis.models.
+from job_radar.tools.page_analysis.models import AIPageInput, ImportantLink
+
 
 APPLICATION_STATUSES = [
     "未查看",
@@ -121,43 +126,6 @@ class JobRecord(RawJobRecord):
     last_seen_at: str = Field(default_factory=utc_now_iso)
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
-
-
-class ImportantLink(BaseModel):
-    """Relevant link preserved as extraction context."""
-
-    url: str
-    text: str = ""
-
-    kind: Literal[
-        "attachment",
-        "apply",
-        "source",
-        "other",
-    ] = "other"
-
-    reason: str = ""
-
-
-class AIPageInput(BaseModel):
-    """Minimal page representation consumed by job extraction."""
-
-    url: str
-    final_url: str | None = None
-
-    source_name: str | None = None
-    source_company_name: str | None = None
-    company_type: str | None = None
-    source_location: str | None = None
-
-    is_official: bool = False
-
-    title: str
-    visible_text: str
-
-    important_links: list[ImportantLink] = Field(
-        default_factory=list
-    )
 
 
 class ExtractedPageContext(BaseModel):

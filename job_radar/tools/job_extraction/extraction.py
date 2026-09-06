@@ -1,4 +1,4 @@
-"""AI-backed extraction of factual job records from processed pages."""
+"""AI-backed extraction of factual job records from prepared pages."""
 
 import re
 from urllib.parse import urlparse
@@ -7,7 +7,7 @@ from pydantic import TypeAdapter
 
 from job_radar.infra.llm.base import AIProvider
 from job_radar.infra.llm.prompt_builder import build_json_prompt
-from job_radar.infra.llm.prompt_loader import load_skill
+from job_radar.infra.llm.prompt_loader import load_runtime_prompt
 
 from job_radar.tools.job_extraction.models import (
     AIPageInput,
@@ -18,6 +18,11 @@ from job_radar.tools.job_extraction.models import (
 
 from job_radar.tools.page_acquisition.models import PageDocument
 from job_radar.tools.page_analysis.cleaning import clean_page_text, parse_acquired_page
+from job_radar.tools.page_analysis.preparation import (
+    build_ai_page_input,
+    extract_important_links,
+    prepare_page,
+)
 
 
 _VISIBLE_URL_PATTERN = re.compile(
@@ -29,7 +34,7 @@ _TRAILING_URL_PUNCTUATION = (
 )
 
 
-def build_ai_page_input(
+def _legacy_build_ai_page_input(
     page: PageDocument,
     max_text_chars: int = 12000,
 ) -> AIPageInput:
@@ -82,7 +87,7 @@ def build_ai_page_input(
     )
 
 
-def extract_important_links(
+def _legacy_extract_important_links(
     page: PageDocument,
     max_links: int = 10,
 ) -> list[ImportantLink]:
@@ -202,10 +207,7 @@ class AIJobExtractionClient:
         Build AI input from a collected page and extract jobs.
         """
 
-        payload = build_ai_page_input(
-            page,
-            max_text_chars=self.max_text_chars,
-        )
+        payload = prepare_page(page, max_text_chars=self.max_text_chars).page
 
         return self.extract_jobs_from_input(
             payload
@@ -220,7 +222,7 @@ class AIJobExtractionClient:
         Extract one or more jobs from one processed page.
         """
 
-        skill = load_skill(
+        skill = load_runtime_prompt(
             self.skill_name
         )
 
@@ -236,8 +238,10 @@ class AIJobExtractionClient:
                     "semantic page_context fields, graduation eligibility "
                     "fields, start date fields, and per-job title, location, "
                     "description, and requirements. "
-                    "Return every explicitly named position even when one "
-                    "or more job fields are null. "
+                    "This is a job_detail page: return only the one primary "
+                    "job on the page; ignore related, similar, recommended, "
+                    "sidebar, and navigation jobs. Extract company_name "
+                    "from the title or main JD body when explicitly stated. "
                     "Do not invent information that is not supported by "
                     "the page."
                     + (
@@ -289,7 +293,7 @@ class AIJobExtractionClient:
                 retry_instruction=retry_instruction,
             )
 
-        skill = load_skill(
+        skill = load_runtime_prompt(
             self.skill_name
         )
 
@@ -316,8 +320,11 @@ class AIJobExtractionClient:
                     "Return a JSON array with one object per input page. "
                     "Each object must contain the unchanged page_id, "
                     "semantic page_context fields, graduation eligibility "
-                    "fields, start date fields, and every explicitly named "
-                    "position even when one or more job fields are null. "
+                    "fields, start date fields, and only the one primary job "
+                    "for each input job_detail page. Ignore related, similar, "
+                    "recommended, sidebar, and navigation jobs. Extract "
+                    "company_name from the title or main JD body when "
+                    "explicitly stated. "
                     "Do not invent information that is not supported by "
                     "the page."
                     + (
@@ -394,6 +401,7 @@ def _to_raw_records(
 
     context["company_name"] = (
         context.get("company_name")
+        or _extract_explicit_company_name(page_input)
         or page_input.source_company_name
     )
 
@@ -459,6 +467,61 @@ def _semantic_page_payload(
             page_input.visible_text
         ),
     }
+
+
+_COMPANY_LABEL_PATTERN = re.compile(
+    r"^(?:company|employer|hiring company|organization|公司名称|招聘单位|用人单位|雇主)\s*[:：]\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
+_ABOUT_COMPANY_PATTERN = re.compile(
+    r"^(?:about|关于)\s+(.+?)\s*$",
+    re.IGNORECASE,
+)
+_UNDISCLOSED_COMPANY_MARKERS = (
+    "our client",
+    "the client",
+    "我们的客户",
+    "客户公司",
+    "匿名雇主",
+)
+_COMPANY_SUFFIX_PATTERN = re.compile(
+    r"(?:\b(?:inc|corp|corporation|co\.?|ltd|limited|llc|plc)\.?$|有限公司$|集团$|科技$|银行$)",
+    re.IGNORECASE,
+)
+
+
+def _extract_explicit_company_name(page_input: AIPageInput) -> str | None:
+    """Extract only conservatively labelled employer names from page text."""
+
+    for line_index, raw_line in enumerate(
+        (page_input.title, *page_input.visible_text.splitlines())
+    ):
+        line = raw_line.strip().strip("|-—–")
+        if not line:
+            continue
+        for pattern in (_COMPANY_LABEL_PATTERN, _ABOUT_COMPANY_PATTERN):
+            match = pattern.match(line)
+            if not match:
+                continue
+            candidate = match.group(1).strip(" .,:;，。：")
+            if candidate and not any(
+                marker in candidate.casefold()
+                for marker in _UNDISCLOSED_COMPANY_MARKERS
+            ):
+                return candidate
+        if line_index == 0:
+            for candidate in re.split(r"\s*[|｜—–]\s*|\s+-\s+", line):
+                candidate = candidate.strip(" .,:;，。：")
+                if (
+                    candidate
+                    and _COMPANY_SUFFIX_PATTERN.search(candidate)
+                    and not any(
+                        marker in candidate.casefold()
+                        for marker in _UNDISCLOSED_COMPANY_MARKERS
+                    )
+                ):
+                    return candidate
+    return None
 
 
 def _classify_link(

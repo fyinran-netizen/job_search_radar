@@ -5,10 +5,10 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from job_radar.infra.llm.prompt_loader import SkillDocument
+from job_radar.infra.llm.prompt_loader import RuntimePrompt
 
 
-def build_json_prompt(skill: SkillDocument, payload: dict[str, Any], output_model: type[BaseModel] | None = None) -> str:
+def build_json_prompt(prompt: RuntimePrompt, payload: dict[str, Any], output_model: type[BaseModel] | None = None) -> str:
     """Build a prompt that asks the provider to return only JSON."""
 
     schema_text = ""
@@ -18,8 +18,7 @@ def build_json_prompt(skill: SkillDocument, payload: dict[str, Any], output_mode
     return "\n\n".join(
         part
         for part in [
-            skill.instructions.strip(),
-            skill.examples.strip(),
+            prompt.instructions.strip(),
             "Return ONLY valid JSON. Do not include Markdown or explanations.",
             f"Output schema:\n{schema_text}" if schema_text else "",
             f"Input:\n{payload_text}",

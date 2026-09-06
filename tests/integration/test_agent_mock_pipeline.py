@@ -89,6 +89,7 @@ def test_mock_agent_action_sequence_updates_state_and_stops() -> None:
         "web_search",
         "acquire_page",
         "acquire_page",
+        "acquire_page",
         "analyze_page",
         "job_extraction",
         "job_understanding",
@@ -102,7 +103,7 @@ def test_mock_agent_action_sequence_updates_state_and_stops() -> None:
     assert [source.url for source in state.selected_sources] == source_expectations["selected_urls"]
     assert len(state.acquired_pages) == page_expectations["collected_count"]
     assert [page.url for page in state.acquired_pages] == page_expectations["page_urls"]
-    assert len(state.job_detail_pages) == page_expectations["collected_count"]
+    assert len(state.job_detail_pages) == 2
     assert len(state.prepared_jobs) == job_expectations["prepared_count"]
     assert [job.title for job in state.prepared_jobs] == job_expectations["expected_titles"]
     assert len(state.understanding_records) == 1

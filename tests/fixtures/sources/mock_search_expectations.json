@@ -1,6 +1,6 @@
 {
   "candidate_count": 3,
-  "selected_count": 2,
+  "selected_count": 3,
   "candidate_urls": [
     "mock://future-bank/campus",
     "mock://global-tech/graduates",
@@ -8,6 +8,7 @@
   ],
   "selected_urls": [
     "mock://future-bank/campus",
-    "mock://global-tech/graduates"
+    "mock://global-tech/graduates",
+    "mock://unrelated-forum/thread"
   ]
 }
