@@ -3,25 +3,19 @@
   "role_family": "Analytics",
   "seniority": "graduate",
   "responsibilities": ["Support reporting and data quality."],
-  "hard_requirements": [
+  "requirements": [
     {
       "category": "technical_skill",
-      "importance": "hard",
       "text": "Python and SQL",
       "evidence": "requirements"
-    }
-  ],
-  "preferred_requirements": [],
-  "eligibility_constraints": [
+    },
     {
       "category": "graduation_or_cohort",
-      "importance": "hard",
       "text": "2026 graduates",
       "evidence": "requirements"
     }
   ],
   "work_context": ["Graduate program"],
   "risk_flags": [],
-  "evidence": ["description", "requirements"],
   "confidence": "high"
 }

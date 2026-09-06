@@ -117,8 +117,6 @@ def action_availability(
             reasons.append("prepared_jobs is empty")
         elif not _ununderstood_jobs(state):
             reasons.append("all prepared_jobs are already understood")
-        if profile is None:
-            reasons.append("profile is required by job_understanding")
     elif action == "match_analysis":
         if not state.understanding_records:
             reasons.append("understanding_records is empty")
@@ -177,7 +175,7 @@ def execute_action(
     if action.action == "job_extraction":
         return _run_job_extraction(state, executor, profile)
     if action.action == "job_understanding":
-        return _run_job_understanding(state, executor, profile)
+        return _run_job_understanding(state, executor)
     return _run_match_analysis(state, executor, profile)
 
 
@@ -279,10 +277,9 @@ def _run_job_extraction(state: AgentState, executor: ToolExecutor, profile: User
     })
 
 
-def _run_job_understanding(state: AgentState, executor: ToolExecutor, profile: UserProfile | None) -> AgentState:
-    assert profile is not None
+def _run_job_understanding(state: AgentState, executor: ToolExecutor) -> AgentState:
     jobs = _ununderstood_jobs(state)
-    result = executor.run("job_understanding", JobUnderstandingToolInput(jobs=jobs, profile=profile))
+    result = executor.run("job_understanding", JobUnderstandingToolInput(jobs=jobs))
     if not isinstance(result, JobUnderstandingToolOutput):
         result = JobUnderstandingToolOutput.model_validate(result)
     return state.model_copy(update={

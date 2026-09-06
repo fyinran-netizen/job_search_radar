@@ -419,42 +419,31 @@ def test_job_understanding_analyzer_returns_discipline_neutral_facts() -> None:
         description="Prepare policy briefs and consult stakeholders on public programs.",
         requirements="Strong written communication, research judgment, and 2026 graduates.",
     )
-    profile = UserProfile(
-        graduation_date="2026-06",
-        target_roles=["Policy Analyst"],
-        skills=["writing", "research"],
-    )
     provider = MockAIProvider(
         {
             "canonical_role": "Policy Graduate",
             "role_family": "policy",
             "seniority": "graduate",
             "responsibilities": ["Prepare policy briefs.", "Consult stakeholders."],
-            "hard_requirements": [
+            "requirements": [
                 {
                     "category": "communication",
-                    "importance": "hard",
                     "text": "Strong written communication.",
                     "evidence": "Strong written communication",
-                }
-            ],
-            "preferred_requirements": [],
-            "eligibility_constraints": [
+                },
                 {
                     "category": "graduation_or_cohort",
-                    "importance": "hard",
                     "text": "Open to 2026 graduates.",
                     "evidence": "2026 graduates",
                 }
             ],
             "work_context": ["Public programs."],
             "risk_flags": [],
-            "evidence": ["Prepare policy briefs", "Strong written communication"],
             "confidence": "high",
         }
     )
 
-    record = JobUnderstandingAnalyzer(provider).understand(job, profile)
+    record = JobUnderstandingAnalyzer(provider).understand(job)
 
     assert record.source == "ai"
     assert not hasattr(record, "job")
@@ -462,8 +451,10 @@ def test_job_understanding_analyzer_returns_discipline_neutral_facts() -> None:
     assert not hasattr(record, "title")
     assert record.basic_gate.decision == "continue"
     assert record.understanding is not None
-    assert record.understanding.hard_requirements[0].category == "communication"
+    assert record.understanding.requirements[0].category == "communication"
     assert "technical_skill" not in provider.prompts[1]
+    assert "candidate_profile_context" not in provider.prompts[1]
+    assert "program_basic_gate" not in provider.prompts[1]
 
 
 def test_job_understanding_does_not_execute_or_bypass_basic_gate() -> None:
@@ -473,10 +464,7 @@ def test_job_understanding_does_not_execute_or_bypass_basic_gate() -> None:
     provider = MockAIProvider({})
 
     with pytest.raises(ValueError, match="did not pass Basic Gate"):
-        JobUnderstandingAnalyzer(provider).understand(
-            job,
-            UserProfile(graduation_date="2026-06", target_roles=["Software Engineer"]),
-        )
+        JobUnderstandingAnalyzer(provider).understand(job)
 
     assert provider.prompts == []
 

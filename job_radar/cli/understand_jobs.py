@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
             if not gate.should_continue:
                 continue
             job = job.model_copy(update={"basic_gate": gate})
-            record = analyzer.understand(job, profile)
+            record = analyzer.understand(job)
         except Exception as exc:
             errors.append(
                 {

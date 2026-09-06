@@ -5,11 +5,9 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from job_radar.tools.job_extraction.models import BasicGateResult
-from job_radar.tools.job_extraction.models import JobRecord
 
-RequirementImportance = Literal["hard", "preferred", "context", "unclear"]
+
 RequirementCategory = Literal[
-    "education",
     "major_or_discipline",
     "credential_or_license",
     "technical_skill",
@@ -19,39 +17,41 @@ RequirementCategory = Literal[
     "experience",
     "portfolio_or_work_sample",
     "availability",
-    "location",
-    "work_authorization",
-    "graduation_or_cohort",
     "personal_attribute",
     "other",
 ]
-Seniority = Literal["internship", "graduate", "entry_level", "experienced", "leadership", "unclear"]
+
+Seniority = Literal[
+    "internship",
+    "graduate",
+    "entry_level",
+    "experienced",
+    "leadership",
+    "unclear",
+]
+
 Confidence = Literal["high", "medium", "low"]
 UnderstandingSource = Literal["ai"]
 
 
 class RequirementFact(BaseModel):
-    """One requirement or preference extracted from the job text."""
+    """One semantic candidate requirement extracted from the job text."""
 
     category: RequirementCategory
-    importance: RequirementImportance
     text: str
     evidence: str | None = None
 
 
 class JobRequirementFacts(BaseModel):
-    """Structured, discipline-neutral facts extracted from one prepared job."""
+    """Structured semantic understanding of one prepared job."""
 
     canonical_role: str
     role_family: str | None = None
     seniority: Seniority = "unclear"
     responsibilities: list[str] = Field(default_factory=list)
-    hard_requirements: list[RequirementFact] = Field(default_factory=list)
-    preferred_requirements: list[RequirementFact] = Field(default_factory=list)
-    eligibility_constraints: list[RequirementFact] = Field(default_factory=list)
+    requirements: list[RequirementFact] = Field(default_factory=list)
     work_context: list[str] = Field(default_factory=list)
     risk_flags: list[str] = Field(default_factory=list)
-    evidence: list[str] = Field(default_factory=list)
     confidence: Confidence
 
 
@@ -65,9 +65,9 @@ class JobUnderstandingRecord(BaseModel):
 
 
 class JobUnderstandingInput(BaseModel):
-    """Stable payload passed to AI understanding providers."""
+    """Stable job-only payload passed to AI understanding providers."""
 
-    prepared_job: JobRecord
-    candidate_profile_context: dict[str, object] = Field(default_factory=dict)
-
-
+    title: str | None = None
+    description: str | None = None
+    requirements: str | None = None
+    recruitment_type: str | None = None
