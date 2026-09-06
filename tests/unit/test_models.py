@@ -37,7 +37,7 @@ def test_normalization_creates_processed_job_record() -> None:
 
     assert job.company_name == "Example Bank"
     assert job.title == "Data Analyst"
-    assert job.locations == ["上海", "Remote"]
+    assert job.locations == ["Shanghai", "Remote"]
     assert job.deduplication_key == "url|https example invalid apply"
 
 

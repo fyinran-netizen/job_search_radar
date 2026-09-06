@@ -9,6 +9,7 @@ from job_radar.frontend.view_models import group_jobs_by_company
 from job_radar.tools.match_analysis.rule_based import match_records
 from job_radar.tools.job_extraction.normalization import normalize_records
 from job_radar.tools.job_extraction.validation import validate_records
+from job_radar.tools.job_extraction.backend_gate.location import load_city_catalog
 from job_radar.infra.storage.repository import JobRepository
 from job_radar.infra.paths import CONFIG_DIR
 
@@ -156,6 +157,20 @@ def test_normalization_canonicalizes_education_locations_and_dates() -> None:
     assert job.graduation_start == "2026-09"
     assert job.graduation_end == "2027-06-30"
     assert job.deadline == "2026-12-31"
+
+
+def test_location_catalog_prefers_city_and_supports_data_driven_aliases(tmp_path) -> None:
+    catalog_path = tmp_path / "china_cities.json"
+    catalog_path.write_text(
+        '[{"name":"江苏省","pinyin":"Jiangsu","children":'
+        '[{"name":"南京市","pinyin":"Nanjing"}]}]',
+        encoding="utf-8",
+    )
+    catalog = load_city_catalog(catalog_path)
+
+    assert normalize_locations(["南京市"], catalog=catalog) == ["南京"]
+    assert normalize_locations(["Nanjing, Jiangsu"], catalog=catalog) == ["南京"]
+    assert normalize_locations(["江苏省"], catalog=catalog) == ["江苏"]
 
 
 def test_deduplication_removes_obvious_duplicate() -> None:

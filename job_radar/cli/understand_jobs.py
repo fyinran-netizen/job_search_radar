@@ -14,7 +14,7 @@ from pydantic import TypeAdapter, ValidationError
 from job_radar.config import load_runtime_settings
 from job_radar.infra.llm.ollama import OllamaProvider
 from job_radar.tools.job_understanding.analyzer import JobUnderstandingAnalyzer
-from job_radar.tools.job_extraction.basic_gate import evaluate_basic_gate
+from job_radar.tools.job_extraction.backend_gate.gate import evaluate_basic_gate
 from job_radar.config import load_profile
 from job_radar.tools.job_extraction.models import JobRecord
 from job_radar.infra.paths import CONFIG_DIR

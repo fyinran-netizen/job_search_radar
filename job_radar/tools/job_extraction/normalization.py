@@ -4,6 +4,14 @@ import re
 from datetime import date, datetime
 from dataclasses import dataclass, field
 
+from job_radar.tools.job_extraction.backend_gate.education import (
+    normalize_education_level,
+    normalize_education_levels,
+)
+from job_radar.tools.job_extraction.backend_gate.location import (
+    normalize_location,
+    normalize_locations,
+)
 from job_radar.tools.job_extraction.models import JobRecord, RawJobRecord
 
 
@@ -64,80 +72,6 @@ def normalize_key_part(value: str | None) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-_CANONICAL_LOCATIONS = {
-    "beijing": "北京", "北京市": "北京", "shanghai": "上海", "上海市": "上海",
-    "shenzhen": "深圳", "深圳市": "深圳", "guangzhou": "广州", "广州市": "广州",
-    "suzhou": "苏州", "苏州市": "苏州", "hangzhou": "杭州", "杭州市": "杭州",
-    "nanjing": "南京", "南京市": "南京", "chengdu": "成都", "成都市": "成都",
-    "wuhan": "武汉", "武汉市": "武汉", "remote": "Remote", "hybrid": "Hybrid",
-    "sydney": "Sydney", "melbourne": "Melbourne", "brisbane": "Brisbane",
-    "australia": "Australia",
-}
-
-
-def normalize_locations(values: list[str]) -> list[str]:
-    """Canonicalize location expressions for display and Basic Gate matching."""
-    result: list[str] = []
-    for value in values:
-        parts = re.split(r"\s*(?:,|;|/|\\|\||、|，|；)\s*", normalize_text(value))
-        for part in parts:
-            if not part:
-                continue
-            part = _remove_organizational_location_qualifier(part)
-            key = re.sub(r"\s+", " ", part).strip().casefold()
-            canonical = _CANONICAL_LOCATIONS.get(key)
-            if canonical is None:
-                canonical = re.sub(r"(?:市|city)$", "", part, flags=re.IGNORECASE).strip()
-            if canonical and canonical not in result:
-                result.append(canonical)
-    return result
-
-
-def normalize_location(value: str | None) -> str:
-    """Return canonical locations as a display string for old presentation callers."""
-    return ", ".join(normalize_locations([value] if value else []))
-
-
-def normalize_education_levels(values: list[str]) -> list[str]:
-    return list(dict.fromkeys(
-        normalized
-        for value in values
-        if (normalized := normalize_education_level(value))
-    ))
-
-
-_EDUCATION_CANONICAL = {
-    "doctorate": "doctorate",
-    "phd": "doctorate",
-    "ph.d": "doctorate",
-    "master": "master",
-    "bachelor": "bachelor",
-    "undergraduate": "bachelor",
-    "associate": "associate",
-    "high school": "high_school",
-    "secondary": "high_school",
-}
-
-
-def normalize_education_level(value: str | None) -> str:
-    """Map explicit education labels to stable values; retain unknown text."""
-    text = normalize_text(value)
-    if not text:
-        return ""
-    key = text.casefold().replace(" ", "")
-    if any(marker in text for marker in ("博士", "博⼠")) or any(marker in key for marker in ("doctor", "phd")):
-        return "doctorate"
-    if "硕士" in text or any(marker in key for marker in ("master", "研究生")):
-        return "master"
-    if "本科" in text or any(marker in key for marker in ("bachelor", "undergraduate")):
-        return "bachelor"
-    if "大专" in text or "专科" in text or "associate" in key:
-        return "associate"
-    if "高中" in text or "highschool" in key or "secondary" in key:
-        return "high_school"
-    return _EDUCATION_CANONICAL.get(text.casefold(), text)
-
-
 def normalize_date_text(value: str | None) -> str:
     """Normalize supported date/date-time text to ISO strings, otherwise preserve it."""
     text = normalize_text(value)
@@ -152,15 +86,6 @@ def normalize_date_text(value: str | None) -> str:
         return parsed.date().isoformat() if isinstance(parsed, datetime) else parsed.isoformat()
     match = re.fullmatch(r"((?:19|20)\d{2})-(0[1-9]|1[0-2])", candidate)
     return f"{match.group(1)}-{match.group(2)}" if match else text
-
-
-def _remove_organizational_location_qualifier(value: str) -> str:
-    return re.sub(
-        r"\s*[（(](?:总部|分部|办事处|办公室|hq|headquarters|office|branch)[）)]\s*$",
-        "",
-        value,
-        flags=re.IGNORECASE,
-    ).strip()
 
 
 def normalize_graduation_years(values: list[str]) -> list[str]:

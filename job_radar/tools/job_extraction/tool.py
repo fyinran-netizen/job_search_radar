@@ -15,7 +15,7 @@ from job_radar.tools.job_extraction.extraction import (
 
 from job_radar.tools.page_analysis.models import AIPageInput
 from job_radar.tools.job_extraction.models import JobRecord, RawJobRecord
-from job_radar.tools.job_extraction.basic_gate import evaluate_basic_gate
+from job_radar.tools.job_extraction.backend_gate.gate import evaluate_basic_gate
 from job_radar.profile.models import UserProfile
 
 from job_radar.tools.job_extraction.normalization import (

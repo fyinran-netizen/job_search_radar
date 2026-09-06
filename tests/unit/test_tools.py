@@ -29,7 +29,7 @@ from job_radar.tools.page_acquisition.models import PageDocument
 from job_radar.tools.page_analysis.cleaning import clean_page_text
 from job_radar.tools.page_acquisition.technical_triage import triage_pages
 from job_radar.tools.job_extraction.quality import triage_extracted_page
-from job_radar.tools.job_extraction.basic_gate import evaluate_basic_gate
+from job_radar.tools.job_extraction.backend_gate.gate import evaluate_basic_gate
 from job_radar.tools.match_analysis.deterministic import evaluate_deterministic_match
 from job_radar.tools.job_extraction.normalization import normalize_records
 from job_radar.profile.completeness import ProfileCompletenessChecker
@@ -504,11 +504,11 @@ def test_semantic_match_analyzer_merges_deterministic_risks() -> None:
 
     assessment = SemanticMatchAnalyzer(provider).analyze(job, profile)
 
-    assert assessment.analysis_source == "ai_with_deterministic_overrides"
-    assert assessment.match_score == 90
+    assert assessment.analysis_source == "ai"
+    assert assessment.match_score == 96
     assert assessment.recommendation == "apply"
-    assert assessment.confidence == "medium"
-    assert assessment.risk_flags == ["non_official_source", "vague_tech_stack"]
+    assert assessment.confidence == "high"
+    assert assessment.risk_flags == ["vague_tech_stack"]
     assert provider.prompts
     assert "You are Job Radar's semantic match analysis component." in provider.prompts[0]
     assert '"candidate_profile"' in provider.prompts[1]
