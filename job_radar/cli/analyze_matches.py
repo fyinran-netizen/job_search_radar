@@ -16,6 +16,7 @@ from job_radar.infra.llm.ollama import OllamaProvider
 from job_radar.tools.match_analysis.analyzer import SemanticMatchAnalyzer
 from job_radar.config import load_profile
 from job_radar.tools.job_understanding.models import JobUnderstandingRecord
+from job_radar.tools.job_extraction.models import JobRecord
 from job_radar.infra.paths import CONFIG_DIR
 
 
@@ -27,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
         description="Analyze understood jobs with deterministic hard rules and one Ollama semantic matching call per eligible job."
     )
     parser.add_argument("--job-understandings-file", required=True, help="Path to JobUnderstandingRecord[] JSON.")
+    parser.add_argument("--prepared-jobs-file", required=True, help="Path to the corresponding prepared JobRecord[] JSON.")
     parser.add_argument("--profile-dir", default=str(CONFIG_DIR), help="Directory containing profile.yaml or profile.example.yaml.")
     parser.add_argument("--output-file", help="Optional path for FinalMatchAssessment[] JSON.")
     parser.add_argument("--max-jobs", type=int, help="Optional maximum number of prepared jobs to analyze.")
@@ -45,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         records = _load_job_understandings(args.job_understandings_file)
+        jobs = _load_prepared_jobs(args.prepared_jobs_file)
         profile, used_example_profile, profile_path = load_profile(Path(args.profile_dir))
     except (OSError, json.JSONDecodeError, ValidationError) as exc:
         print(f"Invalid match analysis input: {exc}", file=sys.stderr)
@@ -63,14 +66,18 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     analyzer = SemanticMatchAnalyzer(provider, timeout_seconds=args.timeout_seconds)
+    jobs_by_key = {job.deduplication_key: job for job in jobs}
     started = perf_counter()
     assessments = []
     errors = []
     for index, record in enumerate(records, start=1):
-        job = record.job
+        job = jobs_by_key.get(record.deduplication_key)
+        if job is None:
+            errors.append({"index": index, "deduplication_key": record.deduplication_key, "reason": "Prepared job was not found."})
+            continue
         print(f"[{index}/{len(records)}] analyzing: {job.company_name} - {job.title}", file=sys.stderr, flush=True)
         try:
-            assessment = analyzer.analyze_understanding(record, profile)
+            assessment = analyzer.analyze_understanding(record, job, profile)
         except Exception as exc:
             errors.append(
                 {
@@ -122,6 +129,11 @@ def main(argv: list[str] | None = None) -> int:
 def _load_job_understandings(path: str) -> list[JobUnderstandingRecord]:
     with open(path, encoding="utf-8-sig") as file:
         return TypeAdapter(list[JobUnderstandingRecord]).validate_python(json.load(file))
+
+
+def _load_prepared_jobs(path: str) -> list[JobRecord]:
+    with open(path, encoding="utf-8-sig") as file:
+        return TypeAdapter(list[JobRecord]).validate_python(json.load(file))
 
 
 def _write_json(path: str, payload: object) -> None:

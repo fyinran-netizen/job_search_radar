@@ -42,9 +42,6 @@ class JobUnderstandingAnalyzer:
         facts = validate_model(data, JobRequirementFacts)
         return JobUnderstandingRecord(
             deduplication_key=job.deduplication_key,
-            company_name=job.company_name or "",
-            title=job.title or "",
-            job=job,
             basic_gate=basic_gate,
             understanding=facts,
             source="ai",
@@ -84,9 +81,6 @@ class JobUnderstandingAnalyzer:
 def _skipped_record(job: JobRecord, basic_gate: BasicGateResult) -> JobUnderstandingRecord:
     return JobUnderstandingRecord(
         deduplication_key=job.deduplication_key,
-        company_name=job.company_name or "",
-        title=job.title or "",
-        job=job,
         basic_gate=basic_gate,
         understanding=None,
         source="skipped_by_basic_gate",
@@ -125,4 +119,3 @@ def _job_payload(job: JobRecord) -> dict[str, Any]:
         "source_name": job.source_name,
         "is_official": job.is_official,
     }
-

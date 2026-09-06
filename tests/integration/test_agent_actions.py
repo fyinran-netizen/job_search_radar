@@ -108,9 +108,6 @@ def test_stage_actions_are_unavailable_after_their_batch_is_marked_complete():
     )[0]
     understanding = JobUnderstandingRecord(
         deduplication_key=job.deduplication_key,
-        company_name=job.company_name or "Example",
-        title=job.title or "Job",
-        job=job,
         basic_gate=BasicGateResult(),
         source="skipped_by_basic_gate",
     )

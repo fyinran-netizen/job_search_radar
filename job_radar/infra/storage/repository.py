@@ -172,8 +172,11 @@ class JobRepository:
     def _to_row(job: JobRecord) -> dict[str, Any]:
         data = job.model_dump()
         data["graduation_years"] = json.dumps(job.graduation_years, ensure_ascii=False)
-        data["match_reasons"] = json.dumps(job.match_reasons, ensure_ascii=False)
-        data["missing_requirements"] = json.dumps(job.missing_requirements, ensure_ascii=False)
+        # Legacy columns remain in the existing jobs table, but match output is
+        # no longer part of the prepared JobRecord contract.
+        data["match_score"] = 0
+        data["match_reasons"] = "[]"
+        data["missing_requirements"] = "[]"
         data["is_official"] = 1 if job.is_official else 0
         return data
 
@@ -181,8 +184,9 @@ class JobRepository:
     def _from_row(row: sqlite3.Row) -> JobRecord:
         data = dict(row)
         data["graduation_years"] = json.loads(data["graduation_years"])
-        data["match_reasons"] = json.loads(data["match_reasons"])
-        data["missing_requirements"] = json.loads(data["missing_requirements"])
+        data.pop("match_score", None)
+        data.pop("match_reasons", None)
+        data.pop("missing_requirements", None)
         data["is_official"] = bool(data["is_official"])
         return JobRecord.model_validate(data)
 

@@ -172,13 +172,13 @@ The current matcher is a transparent rules engine using profile preferences, key
 - Adding configurable weights per role family.
 - Using structured requirements extracted during normalization.
 - Adding graduation-year and deadline scoring.
-- Replacing the scoring function while preserving `match_score`, `match_reasons`, and `missing_requirements`.
+- Replacing the scoring function while preserving the separate match assessment artifact.
 
 Any stronger algorithm should keep explanations visible to the user.
 
 ## Extending Persistence
 
-The current `jobs` table stores job facts plus user-managed `status` and `notes`. Re-importing the same deduplication key updates source facts and match fields but preserves `status` and `notes`. Future versions can add:
+The current `jobs` table stores job facts plus user-managed `status` and `notes`. Re-importing the same deduplication key updates source facts while preserving `status` and `notes`. Match assessments remain separate artifacts. Future versions can add:
 
 - Application event history.
 - Reminder dates.

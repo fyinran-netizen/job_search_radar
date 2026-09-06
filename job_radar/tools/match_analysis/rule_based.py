@@ -3,6 +3,7 @@
 from job_radar.tools.job_extraction.models import JobRecord
 from job_radar.profile.models import UserProfile
 from job_radar.tools.match_analysis.models import MatchingRules
+from job_radar.tools.match_analysis.models import FinalMatchAssessment
 
 
 def _contains_any(text: str, keywords: list[str]) -> list[str]:
@@ -10,8 +11,8 @@ def _contains_any(text: str, keywords: list[str]) -> list[str]:
     return [keyword for keyword in keywords if keyword.lower() in lowered]
 
 
-def match_record(record: JobRecord, profile: UserProfile, rules: MatchingRules) -> JobRecord:
-    """Score one job record and attach explainable reasons."""
+def match_record(record: JobRecord, profile: UserProfile, rules: MatchingRules) -> FinalMatchAssessment:
+    """Score one prepared job and return a separate match artifact."""
 
     score = 0
     reasons: list[str] = []
@@ -49,14 +50,24 @@ def match_record(record: JobRecord, profile: UserProfile, rules: MatchingRules) 
     if not reasons:
         reasons.append("暂未命中当前示例匹配规则")
 
-    record.match_score = max(0, min(100, score))
-    record.match_reasons = reasons
-    record.missing_requirements = missing_requirements
-    return record
+    final_score = max(0, min(100, score))
+    return FinalMatchAssessment(
+        match_score=final_score,
+        role_fit="high" if final_score >= 70 else "medium" if final_score >= 40 else "low",
+        must_have_fit="partial" if missing_requirements else "yes",
+        match_reasons=reasons,
+        missing_requirements=missing_requirements,
+        risk_flags=[],
+        job_summary=f"{record.company_name} - {record.title}",
+        recommendation="apply" if final_score >= 70 else "consider" if final_score >= 40 else "low_priority",
+        confidence="medium",
+        analysis_source="deterministic",
+        deterministic_reasons=[],
+    )
 
 
-def match_records(records: list[JobRecord], profile: UserProfile, rules: MatchingRules) -> list[JobRecord]:
-    """Score a list of normalized records."""
+def match_records(records: list[JobRecord], profile: UserProfile, rules: MatchingRules) -> list[FinalMatchAssessment]:
+    """Score a list of prepared records into separate match artifacts."""
 
     return [match_record(record, profile, rules) for record in records]
 

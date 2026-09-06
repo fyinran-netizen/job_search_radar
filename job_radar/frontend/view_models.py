@@ -55,9 +55,6 @@ def _job_summary(record: JobRecord) -> dict[str, Any]:
         "source_url": record.source_url,
         "source_name": record.source_name,
         "deduplication_key": record.deduplication_key,
-        "match_score": record.match_score,
-        "match_reasons": record.match_reasons,
-        "missing_requirements": record.missing_requirements,
     }
 
 

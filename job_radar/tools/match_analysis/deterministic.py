@@ -20,7 +20,7 @@ def build_deterministic_final(job: JobRecord, deterministic: BasicGateResult) ->
     """Create a final result for jobs that bypass AI."""
 
     return FinalMatchAssessment(
-        match_score=0 if deterministic.hard_reject else min(job.match_score, deterministic.score_cap or 100),
+        match_score=0 if deterministic.hard_reject else 0,
         role_fit="unclear",
         must_have_fit="no" if deterministic.hard_reject else "unclear",
         match_reasons=deterministic.gate_reasons,

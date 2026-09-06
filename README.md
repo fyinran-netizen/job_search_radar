@@ -139,7 +139,7 @@ The CLI commands can be run independently against JSON artifacts in a temporary 
 .\scripts\uv-local.ps1 run python -m job_radar.cli.classify_pages --cleaned-pages-file .test_tmp/page_run/cleaned_pages.json --output-jd-cleaned-pages-file .test_tmp/page_run/jd_cleaned_pages.json
 .\scripts\uv-local.ps1 run python -m job_radar.cli.extract_jobs --cleaned-pages-file .test_tmp/page_run/jd_cleaned_pages.json --output-run-dir .test_tmp/page_run
 .\scripts\uv-local.ps1 run python -m job_radar.cli.understand_jobs --prepared-jobs-file .test_tmp/page_run/prepared_jobs.json --output-file .test_tmp/page_run/job_understandings.json
-.\scripts\uv-local.ps1 run python -m job_radar.cli.analyze_matches --job-understandings-file .test_tmp/page_run/job_understandings.json --output-file .test_tmp/page_run/match_assessments.json
+.\scripts\uv-local.ps1 run python -m job_radar.cli.analyze_matches --job-understandings-file .test_tmp/page_run/job_understandings.json --prepared-jobs-file .test_tmp/page_run/prepared_jobs.json --output-file .test_tmp/page_run/match_assessments.json
 ```
 
 Provider-backed commands require the relevant local configuration. The mock provider and fixtures are the supported network-free path.

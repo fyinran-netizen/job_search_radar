@@ -23,8 +23,6 @@ def make_job(title: str = "Data Analyst"):
         is_official=True,
     )
     job = normalize_records([raw])[0]
-    job.match_score = 80
-    job.match_reasons = ["技能匹配: Python, SQL"]
     return job
 
 
@@ -37,7 +35,7 @@ def test_sqlite_initialization_and_save_query(temp_db_path) -> None:
     assert result.action == "inserted"
     assert repository.count_jobs() == 1
     assert jobs[0].company_name == "Example Bank"
-    assert jobs[0].match_reasons == ["技能匹配: Python, SQL"]
+    assert not hasattr(jobs[0], "match_score")
 
 
 def test_duplicate_import_does_not_add_record(temp_db_path) -> None:

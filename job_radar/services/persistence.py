@@ -26,33 +26,9 @@ class JobPersistenceService:
 
     @staticmethod
     def merge_match_results(jobs: list[JobRecord], assessments: list[dict[str, object]]) -> list[JobRecord]:
-        """Return final records without mutating checkpoint-owned model values."""
+        """Return prepared facts unchanged; match results stay in their own artifact."""
 
-        by_key = {
-            str(item.get("deduplication_key")): item.get("assessment")
-            for item in assessments
-            if item.get("deduplication_key") and isinstance(item.get("assessment"), dict)
-        }
-        final: list[JobRecord] = []
-        for job in jobs:
-            assessment = by_key.get(job.deduplication_key)
-            if isinstance(assessment, dict):
-                reasons = [str(item) for item in assessment.get("match_reasons", [])]
-                if not reasons:
-                    reasons = [f"Semantic match completed: recommendation={assessment.get('recommendation')}, confidence={assessment.get('confidence')}" ]
-                job = job.model_copy(update={
-                    "match_score": int(assessment.get("match_score", 0)),
-                    "match_reasons": reasons,
-                    "missing_requirements": [str(item) for item in assessment.get("missing_requirements", [])],
-                })
-            else:
-                job = job.model_copy(update={
-                    "match_score": 0,
-                    "match_reasons": ["Semantic match was not completed for this job."],
-                    "missing_requirements": [],
-                })
-            final.append(job)
-        return final
+        return list(jobs)
 
 
 __all__ = ["JobPersistenceService"]

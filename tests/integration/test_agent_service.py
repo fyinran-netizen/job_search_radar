@@ -127,7 +127,7 @@ def test_graph_persists_final_jobs_and_keeps_checkpoint_db_separate(temp_db_path
     assert JobPersistenceService(jobs_path).repository.count_jobs() == 0
 
     resumed = service.resume("persist-on-resume")
-    assert resumed.state.prepared_jobs[0].match_score == 80  # persistence does not mutate checkpoint state
+    assert not hasattr(resumed.state.prepared_jobs[0], "match_score")  # match output is a separate artifact
     assert JobPersistenceService(jobs_path).repository.count_jobs() == 1
 
     # A second graph execution with the same final state is an update, not a duplicate.

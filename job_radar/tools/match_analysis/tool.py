@@ -9,6 +9,7 @@ from job_radar.infra.logging import get_logger
 from job_radar.infra.llm.ollama import OllamaProvider
 from job_radar.profile.models import UserProfile
 from job_radar.tools.base import BaseTool
+from job_radar.tools.job_extraction.models import JobRecord
 from job_radar.tools.job_understanding.models import JobUnderstandingRecord
 from job_radar.tools.match_analysis.analyzer import SemanticMatchAnalyzer
 from job_radar.tools.match_analysis.models import FinalMatchAssessment
@@ -21,6 +22,7 @@ class MatchAnalysisToolInput(BaseModel):
     """Input for Ollama semantic match analysis."""
 
     records: list[JobUnderstandingRecord]
+    prepared_jobs: list[JobRecord] = Field(default_factory=list)
     profile: UserProfile
 
 
@@ -48,10 +50,14 @@ class MatchAnalysisTool(BaseTool):
         analyzer = SemanticMatchAnalyzer(self.provider, timeout_seconds=self.timeout_seconds)
         assessments = []
         errors = []
+        jobs_by_key = {job.deduplication_key: job for job in data.prepared_jobs}
         for index, record in enumerate(data.records, start=1):
-            job = record.job
+            job = jobs_by_key.get(record.deduplication_key)
+            if job is None:
+                errors.append({"index": index, "deduplication_key": record.deduplication_key, "reason": "Prepared job was not found."})
+                continue
             try:
-                assessment: FinalMatchAssessment = analyzer.analyze_understanding(record, data.profile)
+                assessment: FinalMatchAssessment = analyzer.analyze_understanding(record, job, data.profile)
             except Exception as exc:
                 errors.append(
                     {

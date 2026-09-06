@@ -457,6 +457,9 @@ def test_job_understanding_analyzer_returns_discipline_neutral_facts() -> None:
     record = JobUnderstandingAnalyzer(provider).understand(job, profile)
 
     assert record.source == "ai"
+    assert not hasattr(record, "job")
+    assert not hasattr(record, "company_name")
+    assert not hasattr(record, "title")
     assert record.basic_gate.decision == "continue"
     assert record.understanding is not None
     assert record.understanding.hard_requirements[0].category == "communication"

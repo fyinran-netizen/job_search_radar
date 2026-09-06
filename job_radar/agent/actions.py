@@ -294,7 +294,7 @@ def _run_job_understanding(state: AgentState, executor: ToolExecutor, profile: U
 def _run_match_analysis(state: AgentState, executor: ToolExecutor, profile: UserProfile | None) -> AgentState:
     assert profile is not None
     records = _unmatched_records(state)
-    result = executor.run("match_analysis", MatchAnalysisToolInput(records=records, profile=profile))
+    result = executor.run("match_analysis", MatchAnalysisToolInput(records=records, prepared_jobs=state.prepared_jobs, profile=profile))
     if not isinstance(result, MatchAnalysisToolOutput):
         result = MatchAnalysisToolOutput.model_validate(result)
     return state.model_copy(update={

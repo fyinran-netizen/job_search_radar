@@ -58,10 +58,9 @@ class SemanticMatchAnalyzer:
         logger.info("match_analysis final title=%s score=%s decision=%s", job.title, final.match_score, final.recommendation)
         return final
 
-    def analyze_understanding(self, record: JobUnderstandingRecord, profile: UserProfile) -> FinalMatchAssessment:
+    def analyze_understanding(self, record: JobUnderstandingRecord, job: JobRecord, profile: UserProfile) -> FinalMatchAssessment:
         """Analyze one understood job against a profile."""
 
-        job = record.job
         basic_gate = record.basic_gate
         logger.info("match_analysis gate title=%s graduation=%s deadline=%s decision=%s hard_reject=%s reasons=%s", job.title, profile.graduation_date, job.deadline, basic_gate.decision, basic_gate.hard_reject, "; ".join(basic_gate.gate_reasons))
         if not basic_gate.should_continue:
@@ -141,8 +140,4 @@ def _job_payload(job: JobRecord) -> dict[str, Any]:
         "deadline": job.deadline,
         "source_name": job.source_name,
         "is_official": job.is_official,
-        "rule_based_match_score": job.match_score,
-        "rule_based_match_reasons": job.match_reasons,
-        "rule_based_missing_requirements": job.missing_requirements,
     }
-

@@ -115,10 +115,6 @@ class JobRecord(RawJobRecord):
 
     deduplication_key: str
 
-    match_score: int = 0
-    match_reasons: list[str] = Field(default_factory=list)
-    missing_requirements: list[str] = Field(default_factory=list)
-
     status: ApplicationStatus = "未查看"
     notes: str = ""
 

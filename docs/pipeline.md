@@ -353,15 +353,15 @@ It keeps the raw fields and adds:
 - `normalized_title`
 - `normalized_location`
 - `deduplication_key`
-- `match_score`
-- `match_reasons`
-- `missing_requirements`
 - `status`
 - `notes`
 - `first_seen_at`
 - `last_seen_at`
 - `created_at`
 - `updated_at`
+
+Match scores, reasons, and missing requirements belong to the separate
+`FinalMatchAssessment` artifact produced after understanding.
 
 ## 10. Pipeline Result
 

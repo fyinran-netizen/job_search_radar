@@ -59,9 +59,6 @@ class JobUnderstandingRecord(BaseModel):
     """Understanding artifact for one prepared job."""
 
     deduplication_key: str
-    company_name: str
-    title: str
-    job: JobRecord
     basic_gate: BasicGateResult
     understanding: JobRequirementFacts | None = None
     source: UnderstandingSource
