@@ -56,7 +56,7 @@ class RawJobRecord(BaseModel):
     company_type: str | None = None
 
     title: str | None = None
-    location: str | None = None
+    locations: list[str] = Field(default_factory=list)
 
     description: str | None = None
     requirements: str | None = None
@@ -68,11 +68,9 @@ class RawJobRecord(BaseModel):
     graduation_end: str | None = None
     graduation_requirement: str | None = None
 
-    start_date: str | None = None
-    start_date_text: str | None = None
-
-    published_at: str | None = None
     deadline: str | None = None
+
+    education_levels: list[str] = Field(default_factory=list)
 
     apply_url: str | None = None
 
@@ -103,15 +101,20 @@ class RawJobRecord(BaseModel):
             if item.strip()
         ]
 
+    @field_validator("locations", "education_levels", mode="before")
+    @classmethod
+    def parse_string_lists(cls, value: Any) -> list[str]:
+        if value is None or value == "":
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return [part.strip() for part in str(value).replace(";", ",").split(",") if part.strip()]
+
 
 class JobRecord(RawJobRecord):
     """Validated and normalized job record used downstream."""
 
     id: int | None = None
-
-    normalized_company_name: str
-    normalized_title: str
-    normalized_location: str
 
     deduplication_key: str
 
@@ -138,18 +141,16 @@ class ExtractedPageContext(BaseModel):
     graduation_end: str | None = None
     graduation_requirement: str | None = None
 
-    start_date: str | None = None
-    start_date_text: str | None = None
-
-    published_at: str | None = None
     deadline: str | None = None
+
+    education_levels: list[str] = Field(default_factory=list)
 
 
 class ExtractedJobDetail(BaseModel):
     """Fields belonging to one concrete job."""
 
     title: str | None = None
-    location: str | None = None
+    locations: list[str] = Field(default_factory=list)
 
     description: str | None = None
     requirements: str | None = None

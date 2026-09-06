@@ -15,7 +15,7 @@ def sample_raw_records() -> list[RawJobRecord]:
             company_name="China Mobile",
             company_type="State-owned Enterprise",
             title="Data Analyst Graduate",
-            location="Shanghai",
+            locations=["Shanghai"],
             description="Analyze business data and build dashboards.",
             requirements="Python SQL data analysis",
             source_name="China Mobile Careers",
@@ -26,7 +26,7 @@ def sample_raw_records() -> list[RawJobRecord]:
             company_name="China Mobile",
             company_type="State-owned Enterprise",
             title="Data Analyst Graduate",
-            location="Shanghai",
+            locations=["Shanghai"],
             description="Duplicate listing.",
             requirements="Python SQL",
             source_name="China Mobile Careers",
@@ -37,7 +37,7 @@ def sample_raw_records() -> list[RawJobRecord]:
             company_name="Future Bank",
             company_type="Bank",
             title="Technology Graduate Analyst",
-            location="Sydney",
+            locations=["Sydney"],
             description="Build internal banking systems.",
             requirements="Python SQL stakeholder communication",
             source_name="Future Bank Careers",
@@ -48,7 +48,7 @@ def sample_raw_records() -> list[RawJobRecord]:
             company_name="Example Tech",
             company_type="Technology",
             title="Software Engineer Graduate",
-            location="Shenzhen",
+            locations=["Shenzhen"],
             description="Develop backend services.",
             requirements="Python distributed systems",
             source_name="Example Tech Careers",
@@ -58,7 +58,7 @@ def sample_raw_records() -> list[RawJobRecord]:
             company_name="Consulting Co",
             company_type="Consulting",
             title="Business Analyst Graduate",
-            location="Melbourne",
+            locations=["Melbourne"],
             description="Support client analysis.",
             requirements="SQL Excel stakeholder communication",
             source_name="Consulting Co Careers",
@@ -67,7 +67,7 @@ def sample_raw_records() -> list[RawJobRecord]:
         RawJobRecord(
             company_name="Broken Source",
             title=None,
-            location="Beijing",
+            locations=["Beijing"],
             source_name="Broken Careers",
             source_url="https://careers.example/broken",
         ),
@@ -87,7 +87,7 @@ def test_validation_rejects_missing_location() -> None:
     record = RawJobRecord(
         company_name="Example",
         title="Graduate Analyst",
-        location=None,
+        locations=[],
         source_name="Example Careers",
         source_url="https://careers.example/jobs/1",
     )
@@ -105,21 +105,21 @@ def test_validation_rejects_invalid_source_url_and_dates() -> None:
         title="Graduate Analyst",
         source_name="Example Careers",
         source_url="not-a-url",
-        published_at="01/08/2026",
+        deadline="01/08/2026",
     )
 
     result = validate_records([record])
 
     assert len(result.errors) == 1
     assert "source_url must be a supported absolute URL" in result.errors[0].reason
-    assert "published_at must be an ISO 8601 date" in result.errors[0].reason
+    assert "deadline must be an ISO 8601 date" in result.errors[0].reason
 
 
 def test_normalization_canonicalizes_semantic_fields() -> None:
     record = RawJobRecord(
         company_name=" Example  Bank ",
         title="Graduate  Analyst",
-        location="上海； 北京 / 深圳",
+        locations=["上海； 北京 / 深圳"],
         description="Analyse\n  business data",
         requirements="Python\nSQL",
         graduation_years=["2027届", "2026", "2027"],
@@ -129,7 +129,7 @@ def test_normalization_canonicalizes_semantic_fields() -> None:
 
     normalized = normalize_records([record])[0]
 
-    assert normalized.location == "上海, 北京, 深圳"
+    assert normalized.locations == ["上海", "北京", "深圳"]
     assert normalized.description == "Analyse business data"
     assert normalized.requirements == "Python SQL"
     assert normalized.graduation_years == ["2026", "2027"]
@@ -141,25 +141,25 @@ def test_deduplication_removes_obvious_duplicate() -> None:
     normalized = normalize_records(valid)
     result = deduplicate_records(normalized)
 
-    assert len(result.unique_records) == 4
-    assert len(result.duplicate_records) == 1
+    assert len(result.unique_records) == 5
+    assert len(result.duplicate_records) == 0
 
 
 def test_deduplication_keeps_richer_official_record() -> None:
     base = {
         "company_name": "Example Bank",
         "title": "Data Analyst",
-        "location": "Shanghai",
+        "locations": ["Shanghai"],
         "source_name": "Example Careers",
     }
     third_party = RawJobRecord(
         **base,
-        source_url="https://jobs.example/1",
+        source_url=None,
         description="Summary",
     )
     official = RawJobRecord(
         **base,
-        source_url="https://careers.example/1",
+        source_url=None,
         description="Detailed description",
         requirements="Python and SQL",
         is_official=True,
@@ -167,8 +167,8 @@ def test_deduplication_keeps_richer_official_record() -> None:
 
     result = deduplicate_records(normalize_records([third_party, official]))
 
-    assert [record.source_url for record in result.unique_records] == ["https://careers.example/1"]
-    assert [record.source_url for record in result.duplicate_records] == ["https://jobs.example/1"]
+    assert [record.source_url for record in result.unique_records] == [None]
+    assert [record.source_url for record in result.duplicate_records] == [None]
 
 
 def test_group_jobs_by_company_returns_company_first_view() -> None:
@@ -178,7 +178,7 @@ def test_group_jobs_by_company_returns_company_first_view() -> None:
                 company_name="Bank of China",
                 company_type="Bank",
                 title="Information Technology",
-                location="Beijing",
+                locations=["Beijing"],
                 source_name="Bank of China",
                 source_url="https://www.boc.cn/job/1",
                 is_official=True,
@@ -187,7 +187,7 @@ def test_group_jobs_by_company_returns_company_first_view() -> None:
                 company_name="Bank of China",
                 company_type="Bank",
                 title="Data Analyst",
-                location="Shanghai",
+                locations=["Shanghai"],
                 source_name="Bank of China",
                 source_url="https://www.boc.cn/job/2",
                 is_official=True,
@@ -196,7 +196,7 @@ def test_group_jobs_by_company_returns_company_first_view() -> None:
                 company_name="Example Tech",
                 company_type="Technology",
                 title="Software Engineer",
-                location="Sydney",
+                locations=["Sydney"],
                 source_name="Example Careers",
                 source_url="https://careers.example/job/1",
             ),

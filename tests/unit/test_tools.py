@@ -1067,7 +1067,7 @@ def test_ai_job_extraction_falls_back_to_source_location_after_semantic_response
 
     records = AIJobExtractionClient(provider).extract_jobs_from_page(page)
 
-    assert records[0].location == "Shanghai"
+    assert records[0].locations == ["Shanghai"]
     input_payload = provider.prompts[0].rsplit("Input:\n", maxsplit=1)[1]
     assert '"location": "Shanghai"' not in input_payload
 

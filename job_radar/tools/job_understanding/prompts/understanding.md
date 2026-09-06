@@ -1,6 +1,6 @@
 ---
 name: job-understanding
-description: Analyze a validated job record to produce structured, discipline-neutral requirement facts before downstream eligibility checks and matching.
+description: Analyze a validated job record to produce structured, discipline-neutral requirement facts after deterministic gates and before semantic matching.
 ---
 
 # Job Understanding

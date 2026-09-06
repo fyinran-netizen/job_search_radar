@@ -8,6 +8,7 @@ from job_radar.tools.match_analysis.models import BasicGateResult
 from job_radar.tools.job_extraction.models import JobRecord
 from job_radar.profile.models import UserProfile
 from job_radar.profile.cohort import infer_graduation_cohort
+from job_radar.tools.job_extraction.normalization import normalize_locations
 
 
 logger = get_logger(__name__)
@@ -82,8 +83,22 @@ def evaluate_basic_gate(job: JobRecord, profile: UserProfile, today: date | None
             f"candidate {profile_year}, extracted {', '.join(sorted(job_years))}"
         )
 
-    excluded_locations = [_normalize_location_part(value) for value in profile.excluded_locations if value.strip()]
-    job_locations = [_normalize_location_part(value) for value in _split_locations(job.location)]
+    required_levels = {_education_level(value) for value in job.education_levels}
+    required_levels.discard(None)
+    candidate_level = _education_level(profile.education)
+    if required_levels and candidate_level:
+        if not any(_EDUCATION_RANK[candidate_level] >= _EDUCATION_RANK[level] for level in required_levels):
+            return BasicGateResult(
+                decision="skip",
+                hard_reject=True,
+                recommendation_override="skip",
+                gate_reasons=["Explicit education-level requirement does not match."],
+                missing_requirements=[f"Required education level: {', '.join(sorted(required_levels))}."],
+                risk_flags=["education_level_mismatch"],
+            )
+
+    excluded_locations = normalize_locations(profile.excluded_locations)
+    job_locations = normalize_locations(job.locations)
     matched_excluded_locations = sorted(
         {
             excluded
@@ -160,6 +175,26 @@ def _has_explicit_graduation_requirement(value: str | None) -> bool:
             "卒業",
         )
     )
+
+
+_EDUCATION_RANK = {"high_school": 1, "associate": 2, "bachelor": 3, "master": 4, "doctorate": 5}
+
+
+def _education_level(value: str | None) -> str | None:
+    if not value:
+        return None
+    text = value.casefold()
+    if any(marker in text for marker in ("doctor", "ph.d", "博士")):
+        return "doctorate"
+    if any(marker in text for marker in ("master", "硕士")):
+        return "master"
+    if any(marker in text for marker in ("bachelor", "undergraduate", "本科", "学士")):
+        return "bachelor"
+    if any(marker in text for marker in ("associate", "大专", "专科")):
+        return "associate"
+    if any(marker in text for marker in ("high school", "高中")):
+        return "high_school"
+    return None
 
 
 def _split_locations(value: str | None) -> list[str]:

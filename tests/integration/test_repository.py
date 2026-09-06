@@ -15,7 +15,6 @@ def make_job(title: str = "Data Analyst"):
         requirements="Python; SQL",
         recruitment_type="Campus Recruitment",
         graduation_years=["2026"],
-        published_at="2026-07-01",
         deadline="2026-09-30",
         apply_url="https://example.invalid/apply",
         source_url="https://example.invalid",

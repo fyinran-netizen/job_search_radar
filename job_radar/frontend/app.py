@@ -371,7 +371,7 @@ def render_jobs(job_service: JobService) -> None:
             "company",
             "company type",
             "title",
-            "location",
+            "locations",
             "match score",
             "match reasons",
             "missing requirements",

@@ -42,7 +42,7 @@ def match_record(record: JobRecord, profile: UserProfile, rules: MatchingRules) 
         score += weights.get("company_type", 0)
         reasons.append(f"公司类型匹配: {record.company_type}")
 
-    location_hits = _contains_any(record.location or "", profile.preferred_locations)
+    location_hits = _contains_any(", ".join(record.locations), profile.preferred_locations)
     if location_hits:
         score += weights.get("location", 0)
         reasons.append(f"地点匹配: {', '.join(location_hits)}")

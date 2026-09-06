@@ -97,7 +97,7 @@ def triage_extracted_page(
     )
 
     missing_location = sum(
-        not record.location
+        not record.locations
         for record in records
     )
 

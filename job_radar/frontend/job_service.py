@@ -31,7 +31,7 @@ class JobService:
                     "company": job.company_name,
                     "company type": job.company_type,
                     "title": job.title,
-                    "location": job.location,
+                    "locations": job.locations,
                     "status": job.status,
                     "notes": job.notes,
                     "source url": job.source_url,

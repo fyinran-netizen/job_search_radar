@@ -284,7 +284,7 @@ This is why the current project should avoid growing page-specific parsing rules
 | Job extraction | `RuleBasedJobExtractor` | `PageDocument` | `RawJobRecord` list | Convert marker text or simple JD detail pages into raw job records. No LLM API call is made. |
 | Future LLM extraction | `LLMJobExtractor` plus concrete `LLMClient` | `PageDocument` | `RawJobRecord` list | Future replacement for rule-based extraction when page formats become too varied for deterministic parsing. |
 | Validation | `validate_records` | `RawJobRecord` list | Valid records and errors | Reject records missing required fields. |
-| Normalization | `normalize_records` | Valid raw records | `JobRecord` list | Standardize company, title, location, and deduplication key. |
+| Normalization | `normalize_records` | Valid raw records | `JobRecord` list | Canonicalize locations and build URL-first deduplication keys while preserving source company/title. |
 | Deduplication | `deduplicate_records` | `JobRecord` list | Unique jobs and duplicates | Remove obvious duplicate jobs. |
 | Matching | `match_records` | Unique jobs plus profile/rules | Scored jobs | Add match score, reasons, and missing requirements. |
 | Persistence | `JobRepository` | Scored jobs | SQLite rows | Insert or update by deduplication key. Preserve status and notes. |
@@ -331,13 +331,13 @@ It contains source-facing fields such as:
 - `company_name`
 - `company_type`
 - `title`
-- `location`
+- `locations`
 - `description`
 - `requirements`
 - `recruitment_type`
 - `graduation_years`
-- `published_at`
 - `deadline`
+- `education_levels`
 - `apply_url`
 - `source_url`
 - `source_name`
@@ -347,12 +347,10 @@ It contains source-facing fields such as:
 
 `JobRecord` is the cleaned and persistable structure.
 
-It keeps the raw fields and adds:
+It keeps the factual fields and adds:
 
-- `normalized_company_name`
-- `normalized_title`
-- `normalized_location`
-- `deduplication_key`
+- canonical `locations`
+- `deduplication_key` (stable URL first, factual fallback)
 - `status`
 - `notes`
 - `first_seen_at`

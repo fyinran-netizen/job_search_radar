@@ -11,12 +11,11 @@ def group_jobs_by_company(records: list[JobRecord]) -> list[dict[str, Any]]:
 
     grouped: dict[str, dict[str, Any]] = {}
     for record in records:
-        key = record.normalized_company_name or record.company_name
+        key = record.company_name
         group = grouped.setdefault(
             key,
             {
                 "company_name": record.company_name,
-                "normalized_company_name": record.normalized_company_name,
                 "company_type": record.company_type,
                 "is_official": record.is_official,
                 "source_names": [],
@@ -42,14 +41,11 @@ def group_jobs_by_company(records: list[JobRecord]) -> list[dict[str, Any]]:
 def _job_summary(record: JobRecord) -> dict[str, Any]:
     return {
         "title": record.title,
-        "normalized_title": record.normalized_title,
-        "location": record.location,
-        "normalized_location": record.normalized_location,
+        "locations": record.locations,
         "description": record.description,
         "requirements": record.requirements,
         "recruitment_type": record.recruitment_type,
         "graduation_years": record.graduation_years,
-        "published_at": record.published_at,
         "deadline": record.deadline,
         "apply_url": record.apply_url,
         "source_url": record.source_url,

@@ -9,7 +9,7 @@ def test_raw_job_record_parses_graduation_years() -> None:
     record = RawJobRecord(
         company_name="Example",
         title="Data Analyst",
-        location="Shanghai",
+        locations=["Shanghai"],
         source_name="Demo",
         graduation_years="2026; 2027",
         is_official=True,
@@ -18,9 +18,9 @@ def test_raw_job_record_parses_graduation_years() -> None:
     assert record.graduation_years == ["2026", "2027"]
 
 
-def test_job_record_requires_normalized_fields() -> None:
+def test_job_record_requires_deduplication_key() -> None:
     with pytest.raises(ValidationError):
-        JobRecord(company_name="Example", title="Data Analyst", location="Shanghai", source_name="Demo")
+        JobRecord(company_name="Example", title="Data Analyst", locations=["Shanghai"], source_name="Demo")
 
 
 def test_normalization_creates_processed_job_record() -> None:
@@ -28,7 +28,7 @@ def test_normalization_creates_processed_job_record() -> None:
         company_name=" Example  Bank ",
         company_type="Bank",
         title=" Data Analyst ",
-        location="Shanghai / Remote",
+        locations=["Shanghai", "Remote"],
         source_name="Demo",
         apply_url="https://example.invalid/apply",
     )
@@ -37,7 +37,7 @@ def test_normalization_creates_processed_job_record() -> None:
 
     assert job.company_name == "Example Bank"
     assert job.title == "Data Analyst"
-    assert job.location == "Shanghai, Remote"
-    assert job.deduplication_key == "example bank|data analyst|shanghai remote"
+    assert job.locations == ["上海", "Remote"]
+    assert job.deduplication_key == "url|https example invalid apply"
 
 

@@ -236,7 +236,7 @@ class AIJobExtractionClient:
                 "output": (
                     "Return one JSON object with the same page_id, "
                     "semantic page_context fields, graduation eligibility "
-                    "fields, start date fields, and per-job title, location, "
+                    "fields, education level fields, and per-job title, locations, "
                     "description, and requirements. "
                     "This is a job_detail page: return only the one primary "
                     "job on the page; ignore related, similar, recommended, "
@@ -320,7 +320,7 @@ class AIJobExtractionClient:
                     "Return a JSON array with one object per input page. "
                     "Each object must contain the unchanged page_id, "
                     "semantic page_context fields, graduation eligibility "
-                    "fields, start date fields, and only the one primary job "
+                    "fields, education level fields, and only the one primary job "
                     "for each input job_detail page. Ignore related, similar, "
                     "recommended, sidebar, and navigation jobs. Extract "
                     "company_name from the title or main JD body when "
@@ -438,10 +438,8 @@ def _to_raw_records(
             **job.model_dump(),
         }
 
-        if not data.get("location"):
-            data["location"] = (
-                page_input.source_location
-            )
+        if not data.get("locations") and page_input.source_location:
+            data["locations"] = [page_input.source_location]
 
         records.append(
             RawJobRecord.model_validate(

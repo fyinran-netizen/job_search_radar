@@ -37,7 +37,7 @@ class ValidationResult:
 REQUIRED_FIELDS = [
     "company_name",
     "title",
-    "location",
+    "locations",
     "source_name",
 ]
 
@@ -105,10 +105,7 @@ def validate_records(
                     "a supported absolute URL"
                 )
 
-        for field_name in (
-            "published_at",
-            "deadline",
-        ):
+        for field_name in ("deadline",):
             value = getattr(
                 record,
                 field_name,
@@ -124,27 +121,6 @@ def validate_records(
                     f"{field_name} must be "
                     "an ISO 8601 date"
                 )
-
-        if (
-            record.published_at
-            and record.deadline
-            and _is_iso_date(
-                record.published_at
-            )
-            and _is_iso_date(
-                record.deadline
-            )
-            and date.fromisoformat(
-                record.deadline
-            )
-            < date.fromisoformat(
-                record.published_at
-            )
-        ):
-            invalid.append(
-                "deadline must not be "
-                "earlier than published_at"
-            )
 
         if missing or invalid:
             reasons: list[str] = []
