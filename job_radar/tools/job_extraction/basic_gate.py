@@ -4,11 +4,11 @@ import re
 from datetime import date
 
 from job_radar.infra.logging import get_logger
-from job_radar.tools.match_analysis.models import BasicGateResult
+from job_radar.tools.job_extraction.models import BasicGateResult
 from job_radar.tools.job_extraction.models import JobRecord
 from job_radar.profile.models import UserProfile
 from job_radar.profile.cohort import infer_graduation_cohort
-from job_radar.tools.job_extraction.normalization import normalize_locations
+from job_radar.tools.job_extraction.normalization import normalize_education_level, normalize_locations
 
 
 logger = get_logger(__name__)
@@ -83,10 +83,12 @@ def evaluate_basic_gate(job: JobRecord, profile: UserProfile, today: date | None
             f"candidate {profile_year}, extracted {', '.join(sorted(job_years))}"
         )
 
-    required_levels = {_education_level(value) for value in job.education_levels}
-    required_levels.discard(None)
-    candidate_level = _education_level(profile.education)
-    if required_levels and candidate_level:
+    required_levels = {
+        level for value in job.education_levels
+        if (level := normalize_education_level(value)) in _EDUCATION_RANK
+    }
+    candidate_level = normalize_education_level(profile.education)
+    if required_levels and candidate_level in _EDUCATION_RANK:
         if not any(_EDUCATION_RANK[candidate_level] >= _EDUCATION_RANK[level] for level in required_levels):
             return BasicGateResult(
                 decision="skip",

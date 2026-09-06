@@ -20,7 +20,7 @@ from job_radar.tools.search_plan import SearchPlanBuilder, SearchPlanLimits
 from job_radar.tools.search_plan import BuildSearchPlanTool, SearchPlanToolInput
 from job_radar.tools.web_search.source_selection import normalize_url, select_sources
 from job_radar.config import load_matching_rules, load_profile
-from job_radar.tools.job_extraction.models import RawJobRecord
+from job_radar.tools.job_extraction.models import BasicGateResult, RawJobRecord
 from job_radar.tools.web_search.models import CandidateSource, SearchPlan
 from job_radar.tools.web_search.providers.tavily import TavilyWebSearchTool
 from job_radar.tools.web_search.config import load_candidate_sources
@@ -29,7 +29,7 @@ from job_radar.tools.page_acquisition.models import PageDocument
 from job_radar.tools.page_analysis.cleaning import clean_page_text
 from job_radar.tools.page_acquisition.technical_triage import triage_pages
 from job_radar.tools.job_extraction.quality import triage_extracted_page
-from job_radar.tools.match_analysis.basic_gate import evaluate_basic_gate
+from job_radar.tools.job_extraction.basic_gate import evaluate_basic_gate
 from job_radar.tools.match_analysis.deterministic import evaluate_deterministic_match
 from job_radar.tools.job_extraction.normalization import normalize_records
 from job_radar.profile.completeness import ProfileCompletenessChecker
@@ -464,6 +464,21 @@ def test_job_understanding_analyzer_returns_discipline_neutral_facts() -> None:
     assert record.understanding is not None
     assert record.understanding.hard_requirements[0].category == "communication"
     assert "technical_skill" not in provider.prompts[1]
+
+
+def test_job_understanding_does_not_execute_or_bypass_basic_gate() -> None:
+    job = make_prepared_job().model_copy(
+        update={"basic_gate": BasicGateResult(decision="skip", hard_reject=True)},
+    )
+    provider = MockAIProvider({})
+
+    with pytest.raises(ValueError, match="did not pass Basic Gate"):
+        JobUnderstandingAnalyzer(provider).understand(
+            job,
+            UserProfile(graduation_date="2026-06", target_roles=["Software Engineer"]),
+        )
+
+    assert provider.prompts == []
 
 
 def test_semantic_match_analyzer_merges_deterministic_risks() -> None:

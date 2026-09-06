@@ -15,6 +15,8 @@ from job_radar.tools.job_extraction.extraction import (
 
 from job_radar.tools.page_analysis.models import AIPageInput
 from job_radar.tools.job_extraction.models import JobRecord, RawJobRecord
+from job_radar.tools.job_extraction.basic_gate import evaluate_basic_gate
+from job_radar.profile.models import UserProfile
 
 from job_radar.tools.job_extraction.normalization import (
     deduplicate_records,
@@ -41,6 +43,7 @@ class JobExtractionInput(BaseModel):
     """Pages ready for job extraction."""
 
     pages: list[AIPageInput]
+    profile: UserProfile | None = None
 
 
 class JobExtractionOutput(BaseModel):
@@ -217,6 +220,16 @@ class JobExtractionTool(BaseTool):
             )
         )
 
+        gated_records: list[JobRecord] = []
+        gate_rejected_count = 0
+        for record in deduplication_result.unique_records:
+            gate = evaluate_basic_gate(record, data.profile) if data.profile else record.basic_gate
+            prepared = record.model_copy(update={"basic_gate": gate})
+            if gate.should_continue:
+                gated_records.append(prepared)
+            else:
+                gate_rejected_count += 1
+
         validation_errors = [
             {
                 "index": error.index,
@@ -274,11 +287,9 @@ class JobExtractionTool(BaseTool):
                 )
             ),
             "prepared_count": (
-                len(
-                    deduplication_result
-                    .unique_records
-                )
+                len(gated_records)
             ),
+            "basic_gate_rejected_count": gate_rejected_count,
             "pending_count": (
                 len(
                     pending_followups
@@ -293,7 +304,7 @@ class JobExtractionTool(BaseTool):
         logger.info(
             "job_extraction extracted=%s prepared=%s validation_failures=%s duplicates=%s pending=%s",
             len(all_raw_records),
-            len(deduplication_result.unique_records),
+            len(gated_records),
             len(validation_result.errors),
             len(deduplication_result.duplicate_records),
             len(pending_followups),
@@ -316,10 +327,7 @@ class JobExtractionTool(BaseTool):
 
         return JobExtractionOutput(
             raw_records=all_raw_records,
-            prepared_records=(
-                deduplication_result
-                .unique_records
-            ),
+            prepared_records=gated_records,
             duplicate_records=(
                 deduplication_result
                 .duplicate_records

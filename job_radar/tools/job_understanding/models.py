@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from job_radar.tools.match_analysis.models import BasicGateResult
+from job_radar.tools.job_extraction.models import BasicGateResult
 from job_radar.tools.job_extraction.models import JobRecord
 
 RequirementImportance = Literal["hard", "preferred", "context", "unclear"]
@@ -27,7 +27,7 @@ RequirementCategory = Literal[
 ]
 Seniority = Literal["internship", "graduate", "entry_level", "experienced", "leadership", "unclear"]
 Confidence = Literal["high", "medium", "low"]
-UnderstandingSource = Literal["ai", "skipped_by_basic_gate"]
+UnderstandingSource = Literal["ai"]
 
 
 class RequirementFact(BaseModel):

@@ -175,7 +175,7 @@ def execute_action(
     if action.action == "analyze_page":
         return _run_analyze_page(state, executor)
     if action.action == "job_extraction":
-        return _run_job_extraction(state, executor)
+        return _run_job_extraction(state, executor, profile)
     if action.action == "job_understanding":
         return _run_job_understanding(state, executor, profile)
     return _run_match_analysis(state, executor, profile)
@@ -265,9 +265,10 @@ def _run_analyze_page(state: AgentState, executor: ToolExecutor) -> AgentState:
     })
 
 
-def _run_job_extraction(state: AgentState, executor: ToolExecutor) -> AgentState:
+def _run_job_extraction(state: AgentState, executor: ToolExecutor, profile: UserProfile | None) -> AgentState:
     pages = _unextracted_pages(state)
-    result = executor.run("job_extraction", JobExtractionInput(pages=pages))
+    assert profile is not None
+    result = executor.run("job_extraction", JobExtractionInput(pages=pages, profile=profile))
     if not isinstance(result, JobExtractionOutput):
         result = JobExtractionOutput.model_validate(result)
     return state.model_copy(update={

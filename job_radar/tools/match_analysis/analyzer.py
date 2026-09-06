@@ -8,7 +8,7 @@ from job_radar.infra.llm.base import AIProvider
 from job_radar.infra.llm.prompt_loader import load_runtime_prompt
 from job_radar.infra.llm.structured_output import validate_model
 from job_radar.tools.job_extraction.models import JobRecord
-from job_radar.tools.match_analysis.models import BasicGateResult
+from job_radar.tools.job_extraction.models import BasicGateResult
 from job_radar.tools.match_analysis.models import FinalMatchAssessment, ScoringRubric, SemanticMatchAssessment
 from job_radar.profile.models import UserProfile
 from job_radar.tools.job_understanding.models import JobRequirementFacts, JobUnderstandingRecord
@@ -40,6 +40,8 @@ class SemanticMatchAnalyzer:
     def analyze(self, job: JobRecord, profile: UserProfile) -> FinalMatchAssessment:
         """Analyze one job against a profile."""
 
+        # Legacy single-job API: the agent pipeline uses analyze_understanding
+        # with the gate result attached during extraction.
         basic_gate = evaluate_deterministic_match(job, profile)
         logger.info("match_analysis gate title=%s graduation=%s deadline=%s decision=%s hard_reject=%s reasons=%s", job.title, profile.graduation_date, job.deadline, basic_gate.decision, basic_gate.hard_reject, "; ".join(basic_gate.gate_reasons))
         if not basic_gate.should_continue:

@@ -1,6 +1,10 @@
 from job_radar.config import load_matching_rules, load_profile
 from job_radar.tools.job_extraction.models import RawJobRecord
-from job_radar.tools.job_extraction.normalization import deduplicate_records
+from job_radar.tools.job_extraction.normalization import (
+    deduplicate_records,
+    normalize_education_levels,
+    normalize_locations,
+)
 from job_radar.frontend.view_models import group_jobs_by_company
 from job_radar.tools.match_analysis.rule_based import match_records
 from job_radar.tools.job_extraction.normalization import normalize_records
@@ -133,6 +137,25 @@ def test_normalization_canonicalizes_semantic_fields() -> None:
     assert normalized.description == "Analyse business data"
     assert normalized.requirements == "Python SQL"
     assert normalized.graduation_years == ["2026", "2027"]
+
+
+def test_normalization_canonicalizes_education_locations_and_dates() -> None:
+    assert normalize_education_levels(["本科", "本科及以上学历", "硕士及以上", "博士"]) == [
+        "bachelor", "master", "doctorate"
+    ]
+    assert normalize_locations(["杭州（总部）", "Sydney (HQ)"]) == ["杭州", "Sydney"]
+    job = normalize_records([RawJobRecord(
+        company_name="Example",
+        title="Role",
+        locations=["Hangzhou"],
+        graduation_start="2026/09",
+        graduation_end="2027.06.30",
+        deadline="2026/12/31",
+        source_url="https://example.test/job",
+    )])[0]
+    assert job.graduation_start == "2026-09"
+    assert job.graduation_end == "2027-06-30"
+    assert job.deadline == "2026-12-31"
 
 
 def test_deduplication_removes_obvious_duplicate() -> None:

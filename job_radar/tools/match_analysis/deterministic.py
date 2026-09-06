@@ -1,10 +1,10 @@
 """Compatibility wrappers for deterministic checks used by match analysis."""
 
-from job_radar.tools.match_analysis.models import BasicGateResult
+from job_radar.tools.job_extraction.models import BasicGateResult
 from job_radar.tools.job_extraction.models import JobRecord
 from job_radar.tools.match_analysis.models import FinalMatchAssessment, Recommendation, SemanticMatchAssessment
 from job_radar.profile.models import UserProfile
-from job_radar.tools.match_analysis.basic_gate import evaluate_basic_gate
+from job_radar.tools.job_extraction.basic_gate import evaluate_basic_gate
 
 
 DeterministicMatchResult = BasicGateResult

@@ -14,7 +14,7 @@ from job_radar.tools.page_acquisition.models import PageDocument
 from job_radar.tools.job_extraction.models import AIPageInput, RawJobRecord
 from job_radar.tools.job_extraction.normalization import normalize_records
 from job_radar.tools.job_understanding.models import JobUnderstandingRecord
-from job_radar.tools.match_analysis.models import BasicGateResult
+from job_radar.tools.job_extraction.models import BasicGateResult
 from job_radar.tools.web_search.models import CandidateSource, SearchPlan
 from job_radar.profile.models import UserProfile
 
@@ -109,7 +109,7 @@ def test_stage_actions_are_unavailable_after_their_batch_is_marked_complete():
     understanding = JobUnderstandingRecord(
         deduplication_key=job.deduplication_key,
         basic_gate=BasicGateResult(),
-        source="skipped_by_basic_gate",
+        source="ai",
     )
     state = AgentState(
         acquired_pages=[PageDocument(url=url, source_name="Example")],

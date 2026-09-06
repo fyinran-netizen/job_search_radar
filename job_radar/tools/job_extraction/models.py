@@ -41,6 +41,35 @@ ApplicationStatus = Literal[
 ]
 
 
+GateDecision = Literal["continue", "skip"]
+GateSource = Literal["program_basic_gate"]
+
+
+class BasicGateResult(BaseModel):
+    """Deterministic checks performed after extraction and normalization."""
+
+    decision: GateDecision = "continue"
+    hard_reject: bool = False
+    score_cap: int | None = None
+    recommendation_override: str | None = None
+    gate_reasons: list[str] = Field(default_factory=list)
+    missing_requirements: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    source: GateSource = "program_basic_gate"
+
+    @property
+    def should_continue(self) -> bool:
+        return self.decision == "continue"
+
+    @property
+    def should_call_ai(self) -> bool:
+        return self.should_continue
+
+    @property
+    def match_reasons(self) -> list[str]:
+        return self.gate_reasons
+
+
 def utc_now_iso() -> str:
     """Return the current UTC time as an ISO 8601 string."""
 
@@ -125,6 +154,7 @@ class JobRecord(RawJobRecord):
     last_seen_at: str = Field(default_factory=utc_now_iso)
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
+    basic_gate: BasicGateResult = Field(default_factory=BasicGateResult)
 
 
 class ExtractedPageContext(BaseModel):

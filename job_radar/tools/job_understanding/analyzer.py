@@ -6,11 +6,10 @@ from typing import Any
 from job_radar.infra.llm.base import AIProvider
 from job_radar.infra.llm.prompt_loader import load_runtime_prompt
 from job_radar.infra.llm.structured_output import validate_model
-from job_radar.tools.match_analysis.models import BasicGateResult
+from job_radar.tools.job_extraction.models import BasicGateResult
 from job_radar.tools.job_extraction.models import JobRecord
 from job_radar.profile.models import UserProfile
 from job_radar.tools.job_understanding.models import JobRequirementFacts, JobUnderstandingRecord
-from job_radar.tools.match_analysis.basic_gate import evaluate_basic_gate
 
 
 class JobUnderstandingAnalyzer:
@@ -27,11 +26,11 @@ class JobUnderstandingAnalyzer:
         self.timeout_seconds = timeout_seconds
 
     def understand(self, job: JobRecord, profile: UserProfile) -> JobUnderstandingRecord:
-        """Run the basic gate, then understand one job if it remains eligible."""
+        """Understand a job that has already passed the extraction-stage gate."""
 
-        basic_gate = evaluate_basic_gate(job, profile)
+        basic_gate = job.basic_gate
         if not basic_gate.should_continue:
-            return _skipped_record(job, basic_gate)
+            raise ValueError("Job understanding received a job that did not pass Basic Gate.")
 
         system_prompt, user_prompt = self._build_prompts(job, profile, basic_gate)
         data = self.provider.generate_json(
@@ -76,15 +75,6 @@ class JobUnderstandingAnalyzer:
             ],
         }
         return system_prompt, "Input:\n" + json.dumps(user_payload, ensure_ascii=False, indent=2)
-
-
-def _skipped_record(job: JobRecord, basic_gate: BasicGateResult) -> JobUnderstandingRecord:
-    return JobUnderstandingRecord(
-        deduplication_key=job.deduplication_key,
-        basic_gate=basic_gate,
-        understanding=None,
-        source="skipped_by_basic_gate",
-    )
 
 
 def _profile_context(profile: UserProfile) -> dict[str, object]:

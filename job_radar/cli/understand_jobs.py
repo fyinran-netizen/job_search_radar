@@ -14,6 +14,7 @@ from pydantic import TypeAdapter, ValidationError
 from job_radar.config import load_runtime_settings
 from job_radar.infra.llm.ollama import OllamaProvider
 from job_radar.tools.job_understanding.analyzer import JobUnderstandingAnalyzer
+from job_radar.tools.job_extraction.basic_gate import evaluate_basic_gate
 from job_radar.config import load_profile
 from job_radar.tools.job_extraction.models import JobRecord
 from job_radar.infra.paths import CONFIG_DIR
@@ -66,10 +67,13 @@ def main(argv: list[str] | None = None) -> int:
     started = perf_counter()
     records = []
     errors = []
-    skipped_count = 0
     for index, job in enumerate(jobs, start=1):
         print(f"[{index}/{len(jobs)}] understanding: {job.company_name} - {job.title}", file=sys.stderr, flush=True)
         try:
+            gate = evaluate_basic_gate(job, profile)
+            if not gate.should_continue:
+                continue
+            job = job.model_copy(update={"basic_gate": gate})
             record = analyzer.understand(job, profile)
         except Exception as exc:
             errors.append(
@@ -82,8 +86,6 @@ def main(argv: list[str] | None = None) -> int:
                 }
             )
             continue
-        if record.source == "skipped_by_basic_gate":
-            skipped_count += 1
         records.append(record)
 
     try:
@@ -100,7 +102,6 @@ def main(argv: list[str] | None = None) -> int:
         "used_example_profile": used_example_profile,
         "prepared_count": len(jobs),
         "understanding_count": len(records),
-        "skipped_by_basic_gate_count": skipped_count,
         "error_count": len(errors),
         "errors": errors,
         "artifacts": {

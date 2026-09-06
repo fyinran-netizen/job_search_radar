@@ -35,7 +35,7 @@ class JobUnderstandingToolOutput(BaseModel):
 
 
 class JobUnderstandingTool(BaseTool):
-    """Understand prepared jobs with Ollama and deterministic basic gates."""
+    """Understand prepared jobs that passed the extraction-stage Basic Gate."""
 
     name = "job_understanding"
 
@@ -52,7 +52,6 @@ class JobUnderstandingTool(BaseTool):
         analyzer = JobUnderstandingAnalyzer(self.provider, timeout_seconds=self.timeout_seconds)
         records: list[JobUnderstandingRecord] = []
         errors = []
-        skipped_count = 0
         for index, job in enumerate(data.jobs, start=1):
             try:
                 record = analyzer.understand(job, data.profile)
@@ -67,8 +66,6 @@ class JobUnderstandingTool(BaseTool):
                     }
                 )
                 continue
-            if record.source == "skipped_by_basic_gate":
-                skipped_count += 1
             records.append(record)
         report = {
             "understood_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -76,15 +73,13 @@ class JobUnderstandingTool(BaseTool):
             "ollama_model": self.provider.model,
             "prepared_count": len(data.jobs),
             "understanding_count": len(records),
-            "skipped_by_basic_gate_count": skipped_count,
             "error_count": len(errors),
             "errors": errors,
         }
         logger.info(
-            "job_understanding prepared=%s understood=%s skipped=%s errors=%s",
+            "job_understanding prepared=%s understood=%s errors=%s",
             len(data.jobs),
             len(records),
-            skipped_count,
             len(errors),
         )
         logger.info(
