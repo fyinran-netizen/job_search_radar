@@ -258,7 +258,11 @@ def render_checkpoint_debug(agent_service: AgentService) -> None:
 
         latest_entry = history[0]
         st.caption(f"checkpoint_id: `{latest_entry.checkpoint_id or '(none)'}`")
-        st.write("AgentState.errors", _json_value(latest_entry.state.errors))
+        st.write("Checkpoint summary", {
+            "round_index": latest_entry.round_index,
+            "stop_reason": latest_entry.stop_reason,
+            "counts": latest_entry.state_counts,
+        })
         can_resume = bool(latest_entry.next_nodes)
         if can_resume and st.button("\u6267\u884c\u4e0b\u4e00\u4e2a action", key="resume_agent_action"):
             try:
@@ -270,7 +274,7 @@ def render_checkpoint_debug(agent_service: AgentService) -> None:
                 st.error("\u6267\u884c\u4e0b\u4e00\u4e2a action \u5931\u8d25\u3002")
                 st.exception(exc)
         if isinstance(result, AgentServiceResult) and result.run_id == current_run_id:
-            st.write("Latest result", result.state.model_dump(mode="json"))
+            st.write("Latest result summary", _agent_state_summary(result.state))
         st.dataframe(checkpoint_history_rows(history), hide_index=True, width="stretch")
         checkpoint_ids = [entry.checkpoint_id for entry in history]
         selected_for_view = st.selectbox(
@@ -280,7 +284,12 @@ def render_checkpoint_debug(agent_service: AgentService) -> None:
             format_func=lambda value: f"{value[:12]}...",
             key="view_checkpoint",
         )
-        viewed_entry = next(entry for entry in history if entry.checkpoint_id == selected_for_view)
+        try:
+            viewed_entry = agent_service.checkpoint_detail(current_run_id, selected_for_view)
+        except Exception as exc:
+            st.error("Unable to load checkpoint details.")
+            st.exception(exc)
+            return
         _render_checkpoint_state(viewed_entry)
 
         selected_for_replay = st.selectbox(
@@ -312,6 +321,9 @@ def _render_checkpoint_state(entry: CheckpointHistoryEntry) -> None:
     """Render all useful fields from one immutable checkpoint snapshot."""
 
     state = entry.state
+    if state is None:
+        st.error("Checkpoint details were not loaded.")
+        return
     st.caption(f"Viewing checkpoint `{entry.checkpoint_id}` from {entry.created_at or 'unknown time'}")
     st.json({
         "round_index": state.round_index,
@@ -333,6 +345,8 @@ def _render_checkpoint_state(entry: CheckpointHistoryEntry) -> None:
         with st.expander(field_name, expanded=True):
             if field_name == "search_round_results":
                 st.json(_json_value(value))
+            elif field_name in {"acquired_pages", "job_detail_pages"}:
+                st.dataframe(_checkpoint_page_rows(value), hide_index=True, width="stretch")
             elif value and isinstance(value[0], dict):
                 st.dataframe(value, hide_index=True, width="stretch")
             elif value and hasattr(value[0], "model_dump"):
@@ -341,6 +355,47 @@ def _render_checkpoint_state(entry: CheckpointHistoryEntry) -> None:
                 st.dataframe({field_name: value}, hide_index=True, width="stretch")
             else:
                 st.info("No data in this checkpoint.")
+
+
+def _checkpoint_page_rows(value: list[object]) -> list[dict[str, object]]:
+    """Summarize page payloads without sending their body text to Streamlit."""
+
+    rows: list[dict[str, object]] = []
+    for item in value:
+        if isinstance(item, dict):
+            page = item
+        elif hasattr(item, "model_dump"):
+            page = item.model_dump(mode="python")
+        else:
+            page = {}
+        html = page.get("html")
+        visible_text = page.get("visible_text")
+        fetch_evidence = page.get("fetch_evidence") or {}
+        rows.append({
+            "url": page.get("url", ""),
+            "title": page.get("title", ""),
+            "source_name": page.get("source_name", ""),
+            "acquisition_method": page.get("acquisition_method") or fetch_evidence.get("fetch_method", ""),
+            "html_length": len(html) if isinstance(html, str) else 0,
+            "visible_text_length": len(visible_text) if isinstance(visible_text, str) else 0,
+        })
+    return rows
+
+
+def _agent_state_summary(state: object) -> dict[str, object]:
+    if not hasattr(state, "round_index"):
+        return {}
+    return {
+        "round_index": state.round_index,
+        "stop_reason": state.stop_reason,
+        "counts": {
+            field_name: len(getattr(state, field_name))
+            for field_name in (
+                "candidate_sources", "selected_sources", "acquired_pages", "job_detail_pages",
+                "prepared_jobs", "understanding_records", "match_assessments", "errors",
+            )
+        },
+    }
 
 
 def _json_value(value: object) -> object:

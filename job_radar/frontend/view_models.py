@@ -62,11 +62,7 @@ def _append_unique(items: Any, value: str | None) -> None:
 
 
 def checkpoint_history_rows(entries: list[CheckpointHistoryEntry]) -> list[dict[str, Any]]:
-    """Create presentation-only rows with the checkpoint's actual stage data.
-
-    Keeping each stage in its own column makes the history table useful for
-    debugging while avoiding one large, truncated summary string.
-    """
+    """Create compact presentation-only rows; never include checkpoint payloads."""
 
     return [
         {
@@ -74,16 +70,9 @@ def checkpoint_history_rows(entries: list[CheckpointHistoryEntry]) -> list[dict[
             "parent_checkpoint_id": entry.parent_checkpoint_id or "",
             "created_at": entry.created_at or "",
             "next_nodes": ", ".join(entry.next_nodes) or "(complete)",
-            "round_index": entry.state.round_index,
-            "candidate_sources": _model_dump_list(entry.state.candidate_sources),
-            "selected_sources": _model_dump_list(entry.state.selected_sources),
-            "acquired_pages": _model_dump_list(entry.state.acquired_pages),
-            "job_detail_pages": _model_dump_list(entry.state.job_detail_pages),
-            "page_analysis_traces": _model_dump_list(entry.state.page_analysis_traces),
-            "prepared_jobs": _model_dump_list(entry.state.prepared_jobs),
-            "understanding_records": _model_dump_list(entry.state.understanding_records),
-            "match_assessments": _model_dump_list(entry.state.match_assessments),
-            "errors": _model_dump_list(entry.state.errors),
+            "round_index": entry.round_index,
+            "stop_reason": entry.stop_reason or "",
+            **entry.state_counts,
         }
         for entry in entries
     ]

@@ -37,7 +37,10 @@ def build_agent_graph(*, controller: Controller, executor: ToolExecutor, limits:
     graph = StateGraph(AgentGraphState)
 
     def decide_node(state: AgentGraphState) -> dict[str, object]:
-        agent_state = state["agent_state"]
+        # Checkpoint deserialization may return nested dictionaries.  Validate
+        # once at the graph boundary so controllers and actions always receive
+        # the declared Pydantic model.
+        agent_state = _validated_agent_state(state["agent_state"])
         step = int(state.get("step", 0))
         if step >= limits.max_steps:
             return {"agent_state": agent_state.model_copy(update={"stop_reason": "max_steps reached"}),
@@ -68,7 +71,7 @@ def build_agent_graph(*, controller: Controller, executor: ToolExecutor, limits:
 
     for action_name in action_names:
         def action_node(state: AgentGraphState, name: str = action_name) -> dict[str, object]:
-            current = state["agent_state"]
+            current = _validated_agent_state(state["agent_state"])
             trace = state.get("decision_trace", [])
             rationale = str(trace[-1].get("rationale", name)) if trace else name
             action = AgentAction(action=name, rationale=rationale,  # type: ignore[arg-type]
@@ -84,6 +87,10 @@ def build_agent_graph(*, controller: Controller, executor: ToolExecutor, limits:
 
     return graph.compile(checkpointer=checkpointer,
                          interrupt_after=list(action_names) if pause_after_action else None)
+
+
+def _validated_agent_state(value: object) -> AgentState:
+    return value if isinstance(value, AgentState) else AgentState.model_validate(value or {})
 
 
 def _state_summary(state: AgentState) -> dict[str, object]:

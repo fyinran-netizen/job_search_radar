@@ -432,7 +432,7 @@ def test_job_understanding_analyzer_returns_discipline_neutral_facts() -> None:
                     "evidence": "Strong written communication",
                 },
                 {
-                    "category": "graduation_or_cohort",
+                    "category": "other",
                     "text": "Open to 2026 graduates.",
                     "evidence": "2026 graduates",
                 }

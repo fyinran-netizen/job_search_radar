@@ -23,3 +23,4 @@ config/sources.yaml
 config/matching_rules.yaml
 
 .idea/
+/data/
