@@ -328,8 +328,7 @@ def _render_checkpoint_state(entry: CheckpointHistoryEntry) -> None:
     st.json({
         "round_index": state.round_index,
         "stop_reason": state.stop_reason,
-        "last_search_outcome": state.last_search_outcome,
-        "notices": state.notices,
+        "last_search_outcome": state.last_search_outcome
     })
     with st.expander("search_plan", expanded=True):
         st.json(state.search_plan.model_dump(mode="json") if state.search_plan else {})

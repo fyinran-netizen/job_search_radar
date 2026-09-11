@@ -24,3 +24,5 @@ config/matching_rules.yaml
 
 .idea/
 /data/
+
+tests/output/

@@ -37,6 +37,7 @@ class RuntimeSettings:
     extraction: LLMTaskSettings
     understanding: LLMTaskSettings
     match: LLMTaskSettings
+    controller: LLMTaskSettings
 
 
 def load_project_env(env_path: Path = ENV_PATH) -> None:
@@ -94,6 +95,10 @@ def load_runtime_settings() -> RuntimeSettings:
                 os.environ.get("JOB_RADAR_MATCH_OLLAMA_MODEL", "gpt-oss:20b-cloud"),
             ),
             timeout_seconds=_env_int("JOB_RADAR_MATCH_TIMEOUT_SECONDS", 180),
+        ),
+        controller=LLMTaskSettings(
+            model=os.environ.get("JOB_RADAR_CONTROLLER_MODEL", "qwen3:8b"),
+            timeout_seconds=_env_int("JOB_RADAR_CONTROLLER_TIMEOUT_SECONDS", 60),
         ),
     )
 

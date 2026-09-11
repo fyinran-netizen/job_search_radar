@@ -1,9 +1,11 @@
 """Run-state and run-result models for agent workflows."""
 
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from job_radar.agent.action_names import AgentActionName
 from job_radar.profile.models import ProfileCompletenessResult
 from job_radar.tools.job_extraction.models import JobRecord
 from job_radar.tools.job_understanding.models import JobUnderstandingRecord
@@ -25,6 +27,7 @@ class AgentLimits(BaseModel):
         ge=1,
         description="Maximum candidate pages selected for collection per round.",
     )
+    # 暂时保留，当前不执行 relevance score 阈值过滤，后续如有需要再启用。
     min_relevance_score: int = Field(
         default=70,
         ge=0,
@@ -38,6 +41,24 @@ class AgentLimits(BaseModel):
     )
     max_steps: int = Field(default=25, ge=1)
     max_queries_per_round: int = Field(default=6, ge=1)
+    action_call_limits: dict[AgentActionName, int] = Field(
+        default_factory=lambda: {
+            "build_search_plan": 3,
+            "analyze_page": 3,
+            "job_extraction": 3,
+            "job_understanding": 3,
+            "match_analysis": 3,
+        }
+    )
+
+
+class SearchOutcome(str, Enum):
+    """Outcome of the latest search or search-planning operation."""
+
+    PROGRESS = "progress"
+    NO_PROGRESS = "no_progress"
+    ERROR = "error"
+    STOPPED_NO_PROGRESS = "stopped_no_progress"
 
 
 class AgentError(BaseModel):
@@ -60,13 +81,13 @@ class AgentState(BaseModel):
 
     round_index: int = 0
     stop_reason: str | None = None
-    notices: list[str] = Field(default_factory=list)
+    action_call_counts: dict[AgentActionName, int] = Field(default_factory=dict)
 
     search_plan: SearchPlan | None = None
     query_history: list[str] = Field(default_factory=list)
     executed_queries: list[str] = Field(default_factory=list)
-    search_round_results: list[list[CandidateSource]] = Field(default_factory=list)
-    last_search_outcome: str | None = None
+    search_round_results: list[list[CandidateSource]] = Field(default_factory=list)   # 暂时保留：后续考虑替换为更轻量的 search_round_summaries。
+    last_search_outcome: SearchOutcome | None = None
     candidate_sources: list[CandidateSource] = Field(default_factory=list)
     selected_sources: list[CandidateSource] = Field(default_factory=list)
 
@@ -79,7 +100,7 @@ class AgentState(BaseModel):
     extracted_page_urls: list[str] = Field(default_factory=list)
     pending_followups: list[PendingFollowup] = Field(default_factory=list)
     rejected_pages: list[RejectedPage] = Field(default_factory=list)
-    page_analysis_traces: list[PageAnalysisTrace] = Field(default_factory=list)
+    page_analysis_traces: list[PageAnalysisTrace] = Field(default_factory=list)   # 暂时保留：后续迁移到 tracing / observability，不作为长期核心 runtime state。
 
     prepared_jobs: list[JobRecord] = Field(default_factory=list)
     understanding_records: list[JobUnderstandingRecord] = Field(default_factory=list)

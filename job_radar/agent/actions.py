@@ -11,8 +11,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from job_radar.agent.models import AgentError, AgentLimits, AgentState
-from job_radar.agent.action_names import AGENT_ACTION_NAMES, AgentActionName
+from job_radar.agent.models import AgentError, AgentLimits, AgentState, SearchOutcome
+from job_radar.agent.action_names import AgentActionName
+from job_radar.agent.policies.availability import action_availability, _executable_sources
 from job_radar.agent.transitions import stop_with_reason
 from job_radar.profile.models import UserProfile
 from job_radar.tools.executor import ToolExecutor
@@ -48,100 +49,8 @@ class AgentAction(BaseModel):
         return self
 
 
-class ActionAvailability(BaseModel):
-    """Deterministic result of checking one action's hard preconditions."""
-
-    action: AgentActionName
-    available: bool
-    reasons: list[str] = Field(default_factory=list)
-
-
 class ActionPreconditionError(ValueError):
     """Raised when a handler is called without its hard inputs."""
-
-
-def action_availability(
-    action: AgentActionName,
-    state: AgentState,
-    limits: AgentLimits,
-    *,
-    profile: UserProfile | None = None,
-) -> ActionAvailability:
-    """Return availability without making any soft/LLM decision."""
-
-    reasons: list[str] = []
-    if action != "stop" and state.stop_reason is not None:
-        reasons.append("state is already stopped")
-
-    if action == "web_search":
-        if state.search_plan is None:
-            reasons.append("search_plan is missing")
-        if state.round_index >= limits.max_rounds:
-            reasons.append("max_rounds reached")
-        if len(state.prepared_jobs) >= limits.max_results:
-            reasons.append("max_results reached")
-        if state.search_plan is not None and not _plan_has_unexecuted_queries(state):
-            reasons.append("all search-plan queries are already executed")
-    elif action == "build_search_plan":
-        if profile is None:
-            reasons.append("profile is required by build_search_plan")
-        if state.round_index >= limits.max_rounds:
-            reasons.append("max_rounds reached")
-        if state.search_plan is not None and _plan_has_unexecuted_queries(state):
-            reasons.append("current search plan is still active")
-        if state.last_search_outcome == "error":
-            reasons.append("previous Tavily search failed")
-        if state.last_search_outcome == "stopped_no_progress":
-            reasons.append("no-progress stop condition reached")
-    elif action == "acquire_page":
-        if not state.selected_sources:
-            reasons.append("selected_sources is empty")
-        if not _executable_sources(state):
-            reasons.append("no unprocessed executable selected_sources")
-        if len(state.prepared_jobs) >= limits.max_results:
-            reasons.append("max_results reached")
-    elif action == "analyze_page":
-        if not state.acquired_pages:
-            reasons.append("acquired_pages is empty")
-        elif not _unprocessed_acquired_pages(state):
-            reasons.append("all acquired_pages are already processed")
-    elif action == "job_extraction":
-        if not state.job_detail_pages:
-            reasons.append("job_detail_pages is empty")
-        elif not _unextracted_pages(state):
-            reasons.append("all job_detail_pages are already extracted")
-        if len(state.prepared_jobs) >= limits.max_results:
-            reasons.append("max_results reached")
-    elif action == "job_understanding":
-        if not state.prepared_jobs:
-            reasons.append("prepared_jobs is empty")
-        elif not _ununderstood_jobs(state):
-            reasons.append("all prepared_jobs are already understood")
-    elif action == "match_analysis":
-        if not state.understanding_records:
-            reasons.append("understanding_records is empty")
-        elif not _unmatched_records(state):
-            reasons.append("all understanding_records are already matched")
-        if profile is None:
-            reasons.append("profile is required by match_analysis")
-    elif action == "stop":
-        if state.stop_reason is not None:
-            reasons.append("state is already stopped")
-        if not _has_stop_evidence(state, limits):
-            reasons.append("no deterministic stop condition is present")
-
-    return ActionAvailability(action=action, available=not reasons, reasons=reasons)
-
-
-def available_actions(
-    state: AgentState,
-    limits: AgentLimits,
-    *,
-    profile: UserProfile | None = None,
-) -> list[AgentActionName]:
-    """List actions passing hard checks; this does not rank or choose them."""
-
-    return [name for name in AGENT_ACTION_NAMES if action_availability(name, state, limits, profile=profile).available]
 
 
 def execute_action(
@@ -162,6 +71,8 @@ def execute_action(
     if not availability.available:
         raise ActionPreconditionError("; ".join(availability.reasons))
 
+    state = _increment_action_call_count(state, action.action, limits)
+
     if action.action == "stop":
         return stop_with_reason(state, action.stop_reason or action.rationale)
     if action.action == "build_search_plan":
@@ -179,6 +90,21 @@ def execute_action(
     return _run_match_analysis(state, executor, profile)
 
 
+def _increment_action_call_count(
+    state: AgentState,
+    action: AgentActionName,
+    limits: AgentLimits,
+) -> AgentState:
+    """Record one real execution for actions with configured call limits."""
+
+    if action not in limits.action_call_limits:
+        return state
+    current_action_call_count = state.action_call_counts.get(action, 0)
+    action_call_counts = dict(state.action_call_counts)
+    action_call_counts[action] = current_action_call_count + 1
+    return state.model_copy(update={"action_call_counts": action_call_counts})
+
+
 def _run_web_search(state: AgentState, executor: ToolExecutor, limits: AgentLimits) -> AgentState:
     assert state.search_plan is not None
     queries = [q for q in state.search_plan.queries if q not in state.executed_queries]
@@ -187,7 +113,7 @@ def _run_web_search(state: AgentState, executor: ToolExecutor, limits: AgentLimi
         result = executor.run("web_search", plan)
     except Exception as exc:
         return state.model_copy(update={
-            "last_search_outcome": "error",
+            "last_search_outcome": SearchOutcome.ERROR,
             "errors": [*state.errors, AgentError(stage="web_search", reason=str(exc))],
             "executed_queries": _merge_strings(state.executed_queries, queries),
             "query_history": _merge_strings(state.query_history, queries),
@@ -211,7 +137,7 @@ def _run_web_search(state: AgentState, executor: ToolExecutor, limits: AgentLimi
         "search_round_results": [*state.search_round_results, sources],
         "executed_queries": _merge_strings(state.executed_queries, queries),
         "query_history": _merge_strings(state.query_history, queries),
-        "last_search_outcome": "progress" if selected else "no_progress",
+        "last_search_outcome": SearchOutcome.PROGRESS if selected else SearchOutcome.NO_PROGRESS,
     })
 
 
@@ -225,7 +151,7 @@ def _run_build_search_plan(state: AgentState, executor: ToolExecutor, limits: Ag
     ))
     plan = result if isinstance(result, SearchPlan) else SearchPlan.model_validate(result)
     if not plan.queries:
-        return state.model_copy(update={"last_search_outcome": "stopped_no_progress"})
+        return state.model_copy(update={"last_search_outcome": SearchOutcome.STOPPED_NO_PROGRESS})
     return state.model_copy(update={"search_plan": plan, "executed_queries": []})
 
 
@@ -250,7 +176,7 @@ def _run_acquire_page(state: AgentState, executor: ToolExecutor) -> AgentState:
 
 def _run_analyze_page(state: AgentState, executor: ToolExecutor) -> AgentState:
     pages = _unprocessed_acquired_pages(state)
-    result = executor.run("analyze_page", PageAnalysisInput(pages=pages, search_plan=state.search_plan))
+    result = executor.run("analyze_page", PageAnalysisInput(pages=pages))
     if not isinstance(result, PageAnalysisOutput):
         result = PageAnalysisOutput.model_validate(result)
     return state.model_copy(update={
@@ -302,23 +228,6 @@ def _run_match_analysis(state: AgentState, executor: ToolExecutor, profile: User
     })
 
 
-def _executable_sources(state: AgentState) -> list[CandidateSource]:
-    handled = _state_urls(state)
-    return [source for source in state.selected_sources if normalize_url(source.url) not in handled]
-
-
-def _state_urls(state: AgentState) -> set[str]:
-    urls = {normalize_url(page.url) for page in state.acquired_pages}
-    urls.update(normalize_url(item.url) for item in state.pending_followups)
-    urls.update(normalize_url(item.url) for item in state.rejected_pages)
-    urls.update(normalize_url(error.url) for error in state.errors if error.url)
-    return urls
-
-
-def _plan_has_unexecuted_queries(state: AgentState) -> bool:
-    return bool(state.search_plan and any(query not in state.executed_queries for query in state.search_plan.queries))
-
-
 def _unprocessed_acquired_pages(state: AgentState) -> list[Any]:
     completed = set(state.analyzed_page_urls)
     return [page for page in state.acquired_pages if page.url not in completed]
@@ -354,17 +263,6 @@ def _merge_by_key(existing: list[Any], additions: list[Any], key) -> list[Any]:
             positions[item_key] = len(merged)
             merged.append(item)
     return merged
-
-
-def _has_stop_evidence(state: AgentState, limits: AgentLimits) -> bool:
-    return (
-        state.round_index >= limits.max_rounds
-        or len(state.prepared_jobs) >= limits.max_results
-        or state.last_search_outcome == "error"
-        or state.last_search_outcome == "stopped_no_progress"
-        or (not state.search_plan and not state.candidate_sources and not state.selected_sources)
-        or (not state.acquired_pages and not state.job_detail_pages and not state.prepared_jobs and bool(state.errors))
-    )
 
 
 def _report_errors(stage: str, report: dict[str, Any]) -> list[AgentError]:

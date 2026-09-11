@@ -1,7 +1,6 @@
 """Factories for tool executor setup."""
 
 from job_radar.infra.llm.base import AIProvider
-from job_radar.infra.llm.ollama import OllamaProvider
 from job_radar.tools.executor import ToolExecutor
 from job_radar.tools.job_extraction.tool import JobExtractionTool
 from job_radar.tools.job_understanding.tool import JobUnderstandingTool
@@ -44,9 +43,9 @@ def create_manual_http_tool_executor(
 
 def create_real_search_tool_executor(
     analyze_page_provider: AIProvider,
-    job_extraction_provider: OllamaProvider,
-    job_understanding_provider: OllamaProvider,
-    match_analysis_provider: OllamaProvider,
+    job_extraction_provider: AIProvider,
+    job_understanding_provider: AIProvider,
+    match_analysis_provider: AIProvider,
     max_sources: int = 10,
 ) -> ToolExecutor:
     """Create the real E2E executor with one Page Analysis capability."""

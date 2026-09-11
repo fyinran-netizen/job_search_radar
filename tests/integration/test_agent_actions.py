@@ -3,11 +3,11 @@ import pytest
 from job_radar.agent.actions import (
     ActionPreconditionError,
     AgentAction,
-    action_availability,
-    available_actions,
     execute_action,
 )
-from job_radar.agent.models import AgentLimits, AgentState
+from job_radar.agent.policies.availability import action_availability
+from job_radar.agent.policies.namespace import available_actions
+from job_radar.agent.models import AgentLimits, AgentState, SearchOutcome
 from job_radar.tools.base import BaseTool
 from job_radar.tools.executor import ToolExecutor
 from job_radar.tools.page_acquisition.models import PageDocument
@@ -78,6 +78,45 @@ def test_web_search_advances_round_and_selects_sources():
     assert result.round_index == 1
     assert len(result.candidate_sources) == 1
     assert len(result.selected_sources) == 1
+    assert result.last_search_outcome is SearchOutcome.PROGRESS
+    assert result.action_call_counts == {}
+
+
+def test_limited_action_call_budget_is_checked_and_counted_once():
+    url = "https://example.test/job"
+    state = AgentState(
+        acquired_pages=[PageDocument(url=url, source_name="Example")],
+    )
+    limits = AgentLimits(action_call_limits={"analyze_page": 1})
+
+    result = execute_action(
+        AgentAction(action="analyze_page", rationale="Analyze page"),
+        state,
+        ToolExecutor(
+            [
+                _RecordingAnalysisTool(),
+            ]
+        ),
+        limits,
+    )
+
+    assert result.action_call_counts == {"analyze_page": 1}
+    availability = action_availability("analyze_page", result, limits)
+    assert not availability.available
+    assert availability.reasons == ["action call limit reached (1/1)", "all acquired_pages are already processed"]
+
+
+class _RecordingAnalysisTool(BaseTool):
+    name = "analyze_page"
+
+    def run(self, payload):
+        return {
+            "accepted_pages": [],
+            "pending_followups": [],
+            "rejected_pages": [],
+            "traces": [],
+            "report": {},
+        }
 
 
 def test_acquire_page_is_batch_level_and_skips_already_handled_sources():
@@ -143,7 +182,33 @@ def test_max_rounds_and_max_results_are_hard_limits():
         prepared_jobs=[job],
     )
     limits = AgentLimits(max_results=1)
-    assert not action_availability("web_search", result_state, limits).available
+    assert action_availability("web_search", result_state, limits).available
+
+
+def test_search_and_acquisition_guards_do_not_read_prepared_jobs():
+    source = CandidateSource(url="https://example.test/job", title="Job", source_name="Example")
+    state = AgentState(
+        search_plan=SearchPlan(keywords=["jobs"]),
+        selected_sources=[source],
+        prepared_jobs=[normalize_records([RawJobRecord(company_name="Example", title="Job", location="Sydney")])[0]],
+    )
+
+    limits = AgentLimits(max_results=1)
+    assert action_availability("web_search", state, limits).available
+    assert action_availability("acquire_page", state, limits).available
+
+
+def test_job_extraction_requires_profile_at_availability_boundary():
+    state = AgentState(
+        job_detail_pages=[
+            AIPageInput(url="https://example.test/job", title="Job", visible_text="description")
+        ]
+    )
+
+    availability = action_availability("job_extraction", state, AgentLimits())
+
+    assert not availability.available
+    assert availability.reasons == ["profile is required by job_extraction"]
 
 
 def test_stop_updates_stop_reason_and_requires_terminal_evidence():

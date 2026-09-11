@@ -3,10 +3,12 @@ import pytest
 from job_radar.agent.actions import AgentAction
 from job_radar.agent.controllers import DecisionContext, LLMController, RuleBasedController
 from job_radar.agent.models import AgentLimits, AgentState
+from job_radar.agent.policies.namespace import available_actions
 from job_radar.profile.models import UserProfile
 from job_radar.tools.job_extraction.models import AIPageInput
 from job_radar.tools.page_acquisition.models import PageDocument
 from job_radar.tools.web_search.models import CandidateSource, SearchPlan
+from tests.doubles.mock_ai_provider import MockAIProvider
 
 
 def decide(
@@ -19,6 +21,11 @@ def decide(
         state=state,
         limits=limits or AgentLimits(),
         profile=profile,
+        available_actions=available_actions(
+            state,
+            limits or AgentLimits(),
+            profile=profile,
+        ),
     )
     return RuleBasedController().decide(context)
 
@@ -67,7 +74,8 @@ def test_rule_based_controller_extracts_from_job_detail_pages() -> None:
                     visible_text="Job description",
                 )
             ],
-        )
+        ),
+        profile=UserProfile(target_roles=["Example Job"]),
     )
 
     assert decision.action == "job_extraction"
@@ -88,8 +96,35 @@ def test_rule_based_controller_stops_when_search_budget_is_exhausted() -> None:
     assert "stop condition" in decision.rationale
 
 
-def test_llm_controller_is_reserved_without_model_or_prompt() -> None:
-    context = DecisionContext(state=AgentState())
+def test_llm_controller_returns_validated_action_from_available_namespace() -> None:
+    state = AgentState()
+    context = DecisionContext(
+        state=state,
+        available_actions=available_actions(state, AgentLimits()),
+    )
 
-    with pytest.raises(NotImplementedError, match="no model, prompt, or API"):
-        LLMController().decide(context)
+    provider = MockAIProvider({
+        "action": "stop",
+        "rationale": "No workflow inputs are available.",
+        "stop_reason": "no deterministic stop condition is present",
+    })
+    decision = LLMController(provider=provider).decide(context)
+
+    assert decision.action == "stop"
+    assert provider.prompts
+    assert "available_actions" in provider.prompts[-1]
+
+
+def test_llm_controller_rejects_action_outside_namespace() -> None:
+    state = AgentState(search_plan=SearchPlan(keywords=["jobs"]))
+    context = DecisionContext(
+        state=state,
+        available_actions=available_actions(state, AgentLimits()),
+    )
+
+    provider = MockAIProvider({
+        "action": "acquire_page",
+        "rationale": "Invalid for this context.",
+    })
+    with pytest.raises(ValueError, match="outside available_actions"):
+        LLMController(provider=provider).decide(context)

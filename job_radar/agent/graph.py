@@ -11,6 +11,7 @@ from job_radar.agent.actions import AgentAction, execute_action
 from job_radar.agent.action_names import AGENT_ACTION_NAMES
 from job_radar.agent.controllers import Controller, DecisionContext
 from job_radar.agent.models import AgentLimits, AgentState
+from job_radar.agent.policies.namespace import available_actions
 from job_radar.profile.models import UserProfile
 from job_radar.tools.executor import ToolExecutor
 from job_radar.infra.storage.repository import UpsertJobsResult
@@ -45,7 +46,22 @@ def build_agent_graph(*, controller: Controller, executor: ToolExecutor, limits:
         if step >= limits.max_steps:
             return {"agent_state": agent_state.model_copy(update={"stop_reason": "max_steps reached"}),
                     "current_action": None, "current_stop_reason": None}
-        context = DecisionContext(state=agent_state, limits=limits, profile=state.get("profile"))
+        last_action = state.get("current_action")
+        stage = last_action
+        context = DecisionContext(
+            state=agent_state,
+            limits=limits,
+            profile=state.get("profile"),
+            available_actions=available_actions(
+                agent_state,
+                limits,
+                profile=state.get("profile"),
+                last_action=last_action,
+                stage=stage,
+            ),
+            last_action=last_action,
+            stage=stage,
+        )
         action = controller.decide(context)
         trace = [*state.get("decision_trace", [])]
         trace.append({"step": step + 1, "available_actions": list(context.available_actions),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from job_radar.agent.actions import AgentAction
 from job_radar.agent.controllers.base import Controller, DecisionContext
+from job_radar.agent.models import SearchOutcome
 from job_radar.tools.web_search.source_selection import normalize_url
 
 
@@ -42,7 +43,7 @@ class RuleBasedController(Controller):
         if state.search_plan is not None and "web_search" in available:
             return self._action("web_search", "search plan exists and search budget remains")
 
-        if state.last_search_outcome == "no_progress" and "build_search_plan" in available:
+        if state.last_search_outcome is SearchOutcome.NO_PROGRESS and "build_search_plan" in available:
             return self._action("build_search_plan", "last search made no progress; re-plan")
 
         if "stop" in available:

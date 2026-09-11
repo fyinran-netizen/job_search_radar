@@ -1,4 +1,5 @@
-from job_radar.agent.actions import AgentAction, available_actions, execute_action
+from job_radar.agent.actions import AgentAction, execute_action
+from job_radar.agent.policies.namespace import available_actions
 from job_radar.agent.models import AgentLimits, AgentState
 from tests.doubles.mock_ai_provider import MockAIProvider
 from job_radar.profile.models import UserProfile

@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from job_radar.infra.logging import get_logger
-from job_radar.infra.llm.ollama import OllamaProvider
+from job_radar.infra.llm.base import AIProvider
 from job_radar.profile.models import UserProfile
 from job_radar.tools.base import BaseTool
 from job_radar.tools.job_extraction.models import JobRecord
@@ -41,7 +41,7 @@ class MatchAnalysisTool(BaseTool):
 
     name = "match_analysis"
 
-    def __init__(self, provider: OllamaProvider, timeout_seconds: int = 180) -> None:
+    def __init__(self, provider: AIProvider, timeout_seconds: int = 180) -> None:
         self.provider = provider
         self.timeout_seconds = timeout_seconds
 
