@@ -38,6 +38,7 @@ class RuntimeSettings:
     understanding: LLMTaskSettings
     match: LLMTaskSettings
     controller: LLMTaskSettings
+    controller_action_summary: LLMTaskSettings
 
 
 def load_project_env(env_path: Path = ENV_PATH) -> None:
@@ -99,6 +100,10 @@ def load_runtime_settings() -> RuntimeSettings:
         controller=LLMTaskSettings(
             model=os.environ.get("JOB_RADAR_CONTROLLER_MODEL", "qwen3:8b"),
             timeout_seconds=_env_int("JOB_RADAR_CONTROLLER_TIMEOUT_SECONDS", 60),
+        ),
+        controller_action_summary=LLMTaskSettings(
+            model=os.environ.get("CONTROLLER_ACTION_SUMMARY_MODEL", "qwen3:8b"),
+            timeout_seconds=_env_int("CONTROLLER_ACTION_SUMMARY_TIMEOUT_SECONDS", 60),
         ),
     )
 

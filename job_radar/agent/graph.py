@@ -10,6 +10,7 @@ from langgraph.graph import END, START, StateGraph
 from job_radar.agent.actions import AgentAction, execute_action
 from job_radar.agent.action_names import AGENT_ACTION_NAMES
 from job_radar.agent.controllers import Controller, DecisionContext
+from job_radar.agent.controllers.llm_controller.outcome_summary import ActionOutcomeSummarizer
 from job_radar.agent.models import AgentLimits, AgentState
 from job_radar.agent.policies.namespace import available_actions
 from job_radar.profile.models import UserProfile
@@ -34,8 +35,10 @@ ActionExecutor = Callable[..., AgentState]
 def build_agent_graph(*, controller: Controller, executor: ToolExecutor, limits: AgentLimits,
                       action_runner: ActionExecutor = execute_action,
                       checkpointer: SqliteSaver, pause_after_action: bool = False,
-                      persistence_service: JobPersistenceService | None = None):
+                      persistence_service: JobPersistenceService | None = None,
+                      action_summarizer: ActionOutcomeSummarizer | None = None):
     graph = StateGraph(AgentGraphState)
+    action_summarizer = action_summarizer or ActionOutcomeSummarizer()
 
     def decide_node(state: AgentGraphState) -> dict[str, object]:
         # Checkpoint deserialization may return nested dictionaries.  Validate
@@ -95,7 +98,8 @@ def build_agent_graph(*, controller: Controller, executor: ToolExecutor, limits:
             next_state = action_runner(action, current, executor, limits, profile=state.get("profile"))
             if next_state == current:
                 raise RuntimeError(f"Agent action {name!r} did not change State; refusing to repeat it")
-            return {"agent_state": next_state}
+            summary = action_summarizer.summarize(name, current, next_state)
+            return {"agent_state": next_state.model_copy(update={"last_action_summary": summary})}
 
         graph.add_node(action_name, action_node)
         graph.add_edge(action_name, "persist" if action_name == "stop" else "decide")

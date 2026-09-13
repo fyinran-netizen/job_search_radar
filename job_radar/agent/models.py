@@ -81,6 +81,7 @@ class AgentState(BaseModel):
 
     round_index: int = 0
     stop_reason: str | None = None
+    last_action_summary: str | None = None
     action_call_counts: dict[AgentActionName, int] = Field(default_factory=dict)
 
     search_plan: SearchPlan | None = None

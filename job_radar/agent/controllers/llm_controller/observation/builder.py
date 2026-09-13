@@ -23,6 +23,7 @@ def build_observation(context: DecisionContext) -> ControllerObservation:
         common=CommonObservation(
             available_actions=list(context.available_actions),
             last_action=context.last_action,
+            last_action_summary=state.last_action_summary,
             stage=context.stage,
             round_index=state.round_index,
             max_rounds=context.limits.max_rounds,

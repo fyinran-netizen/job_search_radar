@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from job_radar.agent.actions import execute_action
 from job_radar.agent.controllers import Controller, RuleBasedController
+from job_radar.agent.controllers.llm_controller.outcome_summary import ActionOutcomeSummarizer
 from job_radar.agent.graph import build_agent_graph
 from job_radar.agent.models import AgentLimits, AgentState
 from job_radar.infra.logging import configure_logging, new_run_id
@@ -66,6 +67,7 @@ class AgentService:
     checkpoint_path: Path = DEFAULT_CHECKPOINT_DB_PATH
     db_path: Path = DEFAULT_DB_PATH
     persistence_service: JobPersistenceService | None = None
+    action_summarizer: ActionOutcomeSummarizer | None = None
 
     def __post_init__(self) -> None:
         if self.persistence_service is None:
@@ -149,7 +151,8 @@ class AgentService:
         return build_agent_graph(controller=self.controller, executor=self.executor, limits=limits,
                                  action_runner=execute_action, checkpointer=saver,
                                  pause_after_action=pause_after_action,
-                                 persistence_service=self.persistence_service)
+                                 persistence_service=self.persistence_service,
+                                 action_summarizer=self.action_summarizer)
 
 
 def _result_from_graph(result: dict[str, object], run_id: str, *, checkpoint_id: str | None = None,
@@ -209,7 +212,8 @@ def create_rule_based_real_agent_service(*, db_path: Path = DEFAULT_DB_PATH,
     runtime = create_real_agent_runtime()
     return AgentService(controller=RuleBasedController(), executor=runtime.executor,
                         limits=limits or AgentLimits(),
-                        persistence_service=JobPersistenceService(db_path))
+                        persistence_service=JobPersistenceService(db_path),
+                        action_summarizer=runtime.action_summarizer)
 
 
 __all__ = ["AgentService", "AgentServiceResult", "CheckpointHistoryEntry", "DecisionTraceEntry",

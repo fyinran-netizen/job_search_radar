@@ -10,6 +10,7 @@ from job_radar.agent.action_names import AgentActionName
 class CommonObservation(BaseModel):
     available_actions: list[AgentActionName]
     last_action: AgentActionName | None = None
+    last_action_summary: str | None = None
     stage: str | None = None
     round_index: int
     max_rounds: int
