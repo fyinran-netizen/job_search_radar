@@ -12,8 +12,8 @@ from job_radar.services.agent_service import (
     AgentService,
     AgentServiceResult,
     CheckpointHistoryEntry,
-    create_rule_based_real_agent_service,
 )
+from job_radar.services.runtime import create_real_agent_runtime
 from job_radar.tools.job_extraction.models import APPLICATION_STATUSES
 from job_radar.profile.models import UserProfile
 from job_radar.frontend.job_service import JobService
@@ -85,7 +85,13 @@ def render_app() -> None:
     st.title("Job Radar")
     st.caption("Local job discovery, matching, and application tracking")
 
-    agent_service = create_rule_based_real_agent_service(db_path=DEFAULT_DB_PATH)
+    runtime = create_real_agent_runtime()
+    agent_service = AgentService(
+        controller=runtime.llm_controller,
+        executor=runtime.executor,
+        action_summarizer=runtime.action_summarizer,
+        db_path=DEFAULT_DB_PATH,
+    )
     job_service = JobService(DEFAULT_DB_PATH)
     default_profile, _, _ = load_profile(CONFIG_DIR)
 
@@ -98,7 +104,7 @@ def render_app() -> None:
     with st.expander("Testing tools"):
         st.caption("Uses mock tools for development checks only.")
         if st.button("Run mock agent search", icon=":material/bug_report:"):
-            st.info("The agent runtime is configured for the RuleBasedController; use the profile form to run it.")
+            st.info("The agent runtime is configured for the LLMController; use the profile form to run it.")
 
     render_checkpoint_debug(agent_service)
     render_jobs(job_service)
@@ -196,7 +202,7 @@ def run_agent_pipeline(agent_service: AgentService, profile: UserProfile) -> Non
     if result.interrupted:
         st.info("工作流已暂停，请在 Checkpoint debugging 区域执行下一个 action。")
     else:
-        st.success("Rule-based agent search finished.")
+        st.success("LLM-controller agent search finished.")
 
 
 def render_agent_service_result(result: AgentServiceResult) -> None:

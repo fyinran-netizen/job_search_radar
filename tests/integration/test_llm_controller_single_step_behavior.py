@@ -20,6 +20,7 @@ from job_radar.agent.models import (
     AgentState,
     SearchOutcome,
 )
+from job_radar.agent.policies.namespace import available_actions
 from job_radar.config import load_project_env, load_runtime_settings
 from job_radar.infra.llm.ollama import OllamaProvider
 from job_radar.profile.models import UserProfile
@@ -30,8 +31,8 @@ from job_radar.tools.job_understanding.models import (
     RequirementFact,
 )
 from job_radar.tools.page_acquisition.models import PageDocument
-from job_radar.tools.web_search.models import CandidateSource
 from job_radar.tools.search_plan.models import SearchPlan
+from job_radar.tools.web_search.models import CandidateSource
 
 
 pytestmark = pytest.mark.skipif(
@@ -42,7 +43,7 @@ pytestmark = pytest.mark.skipif(
 REPORT_PATH = (
     Path(__file__).resolve().parents[1]
     / "output"
-    / "llm_controller_behavior_report.md"
+    / "llm_controller_single_step_behavior_report.md"
 )
 
 DEBUG_RECORDS: list[dict[str, Any]] = []
@@ -50,16 +51,24 @@ DEBUG_RECORDS: list[dict[str, Any]] = []
 
 def make_context(
     state: AgentState,
-    available_actions: list[AgentActionName],
     *,
     profile: UserProfile | None = None,
     last_action: AgentActionName | None = None,
 ) -> DecisionContext:
+    limits = AgentLimits()
+
+    actions = available_actions(
+        state,
+        limits,
+        profile=profile,
+        last_action=last_action,
+    )
+
     return DecisionContext(
         state=state,
-        limits=AgentLimits(),
+        limits=limits,
         profile=profile,
-        available_actions=available_actions,
+        available_actions=actions,
         last_action=last_action,
     )
 
@@ -138,7 +147,6 @@ def ready_search_context() -> DecisionContext:
                 "for the next discovery step."
             ),
         ),
-        ["web_search", "build_search_plan", "stop"],
         last_action="build_search_plan",
     )
 
@@ -158,7 +166,6 @@ def replan_context() -> DecisionContext:
                 "and alternative search directions have not yet been planned."
             ),
         ),
-        ["build_search_plan", "web_search", "stop"],
         profile=profile(),
         last_action="web_search",
     )
@@ -175,7 +182,6 @@ def acquisition_context() -> DecisionContext:
                 "that is ready for page acquisition."
             ),
         ),
-        ["acquire_page", "web_search", "stop"],
         last_action="web_search",
     )
 
@@ -189,7 +195,6 @@ def analysis_context() -> DecisionContext:
                 "that still requires routing analysis."
             ),
         ),
-        ["analyze_page", "job_extraction", "stop"],
         last_action="acquire_page",
     )
 
@@ -203,7 +208,6 @@ def extraction_context() -> DecisionContext:
                 "that is ready for structured extraction."
             ),
         ),
-        ["job_extraction", "analyze_page", "stop"],
         profile=profile(),
         last_action="analyze_page",
     )
@@ -218,7 +222,6 @@ def understanding_context() -> DecisionContext:
                 "that requires requirement understanding."
             ),
         ),
-        ["job_understanding", "job_extraction", "stop"],
         profile=profile(),
         last_action="job_extraction",
     )
@@ -233,7 +236,6 @@ def matching_context() -> DecisionContext:
                 "requirement record ready for candidate matching."
             ),
         ),
-        ["match_analysis", "job_understanding", "stop"],
         profile=profile(),
         last_action="job_understanding",
     )
@@ -256,7 +258,6 @@ def error_with_work_context() -> DecisionContext:
                 "was successfully selected and remains ready for acquisition."
             ),
         ),
-        ["acquire_page", "web_search", "stop"],
         last_action="web_search",
     )
 
@@ -264,11 +265,8 @@ def error_with_work_context() -> DecisionContext:
 def stop_context() -> DecisionContext:
     return make_context(
         AgentState(
-            last_action_summary=(
-                "No actionable workflow work remains."
-            ),
-        ),
-        ["stop"],
+            last_action_summary="No actionable workflow work remains.",
+        )
     )
 
 
@@ -347,7 +345,7 @@ def behavior_report():
             f"\n## Run {run_label}\n\n"
             f"Model: `{model}`\n\n"
             "Context version: "
-            "`after last_action_summary / controller context refactor`\n\n"
+            "`production available_actions + last_action_summary context`\n\n"
         )
 
         report.write(
@@ -403,9 +401,7 @@ def behavior_report():
                     "```\n\n"
                 )
 
-            parsed_decision = record.get(
-                "parsed_decision"
-            )
+            parsed_decision = record.get("parsed_decision")
             if parsed_decision is not None:
                 report.write(
                     "Parsed decision:\n\n"
