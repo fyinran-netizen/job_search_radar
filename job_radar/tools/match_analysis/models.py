@@ -8,8 +8,10 @@ RoleFit = Literal["high", "medium", "low", "unclear"]
 MustHaveFit = Literal["yes", "partial", "no", "unclear"]
 Recommendation = Literal["apply", "consider", "low_priority", "skip"]
 Confidence = Literal["high", "medium", "low"]
-AnalysisSource = Literal["deterministic", "ai", "ai_with_deterministic_overrides"]
-
+AnalysisSource = Literal[
+    "deterministic_only",
+    "semantic_with_program_scoring",
+]
 
 class ScoringRubric(BaseModel):
     """Fixed scoring weights used by semantic match analysis."""

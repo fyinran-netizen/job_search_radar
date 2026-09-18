@@ -32,16 +32,6 @@ class SemanticMatchAnalyzer:
         self.rubric = rubric or ScoringRubric()
         self.timeout_seconds = timeout_seconds
 
-    def analyze(self, job: JobRecord, profile: UserProfile) -> FinalMatchAssessment:
-        """Legacy entry point that uses the gate already stored on ``job``."""
-        record = JobUnderstandingRecord(
-            deduplication_key=job.deduplication_key,
-            basic_gate=job.basic_gate,
-            understanding=None,
-            source="ai",
-        )
-        return self.analyze_understanding(record, job, profile)
-
     def analyze_understanding(self, record: JobUnderstandingRecord, job: JobRecord, profile: UserProfile) -> FinalMatchAssessment:
         """Analyze one understood job against a profile."""
 

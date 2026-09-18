@@ -15,6 +15,7 @@ from job_radar.tools.job_extraction.extraction import (
 from job_radar.tools.job_extraction.models import ImportantLink
 from job_radar.tools.page_analysis.semantic_classification import PageSemanticClassifier
 from job_radar.tools.job_understanding.analyzer import JobUnderstandingAnalyzer
+from job_radar.tools.job_understanding.models import JobUnderstandingRecord
 from job_radar.tools.match_analysis.analyzer import SemanticMatchAnalyzer
 from job_radar.tools.search_plan import SearchPlanBuilder, SearchPlanLimits
 from job_radar.tools.search_plan import BuildSearchPlanTool, SearchPlanToolInput
@@ -332,7 +333,12 @@ def test_deterministic_match_bypasses_ai_for_graduation_year_mismatch() -> None:
     result = evaluate_basic_gate(job, profile)
     job = job.model_copy(update={"basic_gate": result})
     analyzer = SemanticMatchAnalyzer(MockAIProvider({"should_not": "be called"}))
-    assessment = analyzer.analyze(job, profile)
+    record = JobUnderstandingRecord(
+        deduplication_key=job.deduplication_key,
+        basic_gate=result,
+        source="ai",
+    )
+    assessment = analyzer.analyze_understanding(record, job, profile)
 
     assert not result.should_call_ai
     assert result.hard_reject
@@ -521,7 +527,12 @@ def test_semantic_match_analyzer_merges_deterministic_risks() -> None:
 
     gate = evaluate_basic_gate(job, profile)
     job = job.model_copy(update={"basic_gate": gate})
-    assessment = SemanticMatchAnalyzer(provider).analyze(job, profile)
+    record = JobUnderstandingRecord(
+        deduplication_key=job.deduplication_key,
+        basic_gate=gate,
+        source="ai",
+    )
+    assessment = SemanticMatchAnalyzer(provider).analyze_understanding(record, job, profile)
 
     assert assessment.analysis_source == "ai_with_deterministic_overrides"
     assert assessment.match_score == 87
