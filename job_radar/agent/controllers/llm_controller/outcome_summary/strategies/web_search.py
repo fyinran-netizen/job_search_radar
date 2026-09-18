@@ -43,7 +43,7 @@ def summarize(
         "returned_sources": len(round_sources),
         "new_sources": len(new_sources),
         "previously_seen_sources": duplicate_count,
-        "selected_sources": len(after.selected_sources),
+        "selected_sources": len(after.acquisition_queue),
     }
 
     if not round_sources:
@@ -66,7 +66,7 @@ def summarize(
     )
 
     selected_projection = fields(
-        after.selected_sources,
+        after.acquisition_queue,
         (
             "title",
             "source_name",
@@ -103,7 +103,7 @@ def summarize(
             f"Web search returned {len(round_sources)} source(s), "
             f"including {len(new_sources)} new source(s) and "
             f"{duplicate_count} previously seen source(s); "
-            f"{len(after.selected_sources)} source(s) were selected."
+            f"{len(after.acquisition_queue)} source(s) remain queued for acquisition."
         )
 
     return deterministic_summary(

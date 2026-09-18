@@ -15,7 +15,7 @@ def available_actions(
     *,
     profile: UserProfile | None = None,
     last_action: AgentActionName | None = None,
-    stage: str | None = None,
+    stage: AgentActionName | None = None,
 ) -> list[AgentActionName]:
     """Return the final namespace allowed by both deterministic policies."""
 

@@ -70,7 +70,7 @@ def test_web_search_summary_sends_deterministic_stats_without_urls() -> None:
     after = AgentState(
         candidate_sources=[seen, new],
         search_round_results=[[CandidateSource(url="https://example.test/seen/", title="Seen role", source_name="Example"), new]],
-        selected_sources=[new],
+        acquisition_queue=[new],
     )
     provider = MockAIProvider({"summary": "The round added one novel source while retaining one previously seen result."})
 

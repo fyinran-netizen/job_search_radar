@@ -60,6 +60,20 @@ def test_checkpoint_round_trip_includes_acquisition_queue() -> None:
     assert AgentState.model_validate(state.model_dump(mode="json")) == state
 
 
+def test_checkpoint_migration_normalizes_handled_source_url_variants() -> None:
+    state = AgentState(
+        selected_sources=[
+            source("https://example.test/job?utm_source=history"),
+            source("https://example.test/new?utm_campaign=search"),
+        ],
+        acquired_pages=[
+            PageDocument(url="https://example.test/job/", source_name="Example"),
+        ],
+    )
+
+    assert [item.url for item in state.acquisition_queue] == ["https://example.test/new"]
+
+
 def test_action_backlog_is_derived_from_artifacts_and_completion_markers() -> None:
     state = AgentState(
         acquired_pages=[

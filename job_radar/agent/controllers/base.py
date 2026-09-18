@@ -19,7 +19,7 @@ class DecisionContext(BaseModel):
     limits: AgentLimits = Field(default_factory=AgentLimits)
     profile: UserProfile | None = None
     available_actions: list[AgentActionName] = Field(default_factory=list)
-    stage: str | None = None
+    stage: AgentActionName | None = None
     last_action: AgentActionName | None = None
 
 class Controller(ABC):

@@ -21,7 +21,7 @@ _TRANSITIONS: dict[AgentActionName, tuple[AgentActionName, ...]] = {
 def transition_allowed_actions(
     last_action: AgentActionName | None = None,
     *,
-    stage: str | None = None,
+    stage: AgentActionName | None = None,
 ) -> list[AgentActionName]:
     """Return the namespace allowed by workflow position alone.
 

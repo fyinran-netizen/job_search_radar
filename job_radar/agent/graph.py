@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Callable, TypedDict
+from typing import Callable, Literal, TypedDict
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from job_radar.agent.actions import AgentAction, execute_action
-from job_radar.agent.action_names import AGENT_ACTION_NAMES
+from job_radar.agent.action_names import AGENT_ACTION_NAMES, AgentActionName
 from job_radar.agent.controllers import Controller, DecisionContext
 from job_radar.agent.controllers.llm_controller.outcome_summary import ActionOutcomeSummarizer
 from job_radar.agent.models import AgentLimits, AgentState
@@ -23,13 +23,14 @@ class AgentGraphState(TypedDict, total=False):
     agent_state: AgentState
     profile: UserProfile
     step: int
-    current_action: str | None
+    current_action: AgentActionName | None
     current_stop_reason: str | None
     decision_trace: list[dict[str, object]]
     persistence_result: UpsertJobsResult
 
 
 ActionExecutor = Callable[..., AgentState]
+AgentGraphRoute = AgentActionName | Literal["__end__"]
 
 
 def build_agent_graph(*, controller: Controller, executor: ToolExecutor, limits: AgentLimits,
@@ -73,7 +74,7 @@ def build_agent_graph(*, controller: Controller, executor: ToolExecutor, limits:
         return {"step": step + 1, "current_action": action.action,
                 "current_stop_reason": getattr(action, "stop_reason", None), "decision_trace": trace}
 
-    def route(state: AgentGraphState) -> str:
+    def route(state: AgentGraphState) -> AgentGraphRoute:
         return state.get("current_action") or END
 
     def persist_node(state: AgentGraphState) -> dict[str, object]:
@@ -89,11 +90,14 @@ def build_agent_graph(*, controller: Controller, executor: ToolExecutor, limits:
     graph.add_conditional_edges("decide", route, destinations)
 
     for action_name in action_names:
-        def action_node(state: AgentGraphState, name: str = action_name) -> dict[str, object]:
+        def action_node(
+            state: AgentGraphState,
+            name: AgentActionName = action_name,
+        ) -> dict[str, object]:
             current = _validated_agent_state(state["agent_state"])
             trace = state.get("decision_trace", [])
             rationale = str(trace[-1].get("rationale", name)) if trace else name
-            action = AgentAction(action=name, rationale=rationale,  # type: ignore[arg-type]
+            action = AgentAction(action=name, rationale=rationale,
                                  stop_reason=(state.get("current_stop_reason") if name == "stop" else None))
             next_state = action_runner(action, current, executor, limits, profile=state.get("profile"))
             if next_state == current:
@@ -115,7 +119,8 @@ def _validated_agent_state(value: object) -> AgentState:
 
 def _state_summary(state: AgentState) -> dict[str, object]:
     return {"round_index": state.round_index, "stop_reason": state.stop_reason,
-            "candidate_sources": len(state.candidate_sources), "selected_sources": len(state.selected_sources),
+            "candidate_sources": len(state.candidate_sources),
+            "acquisition_queue": len(state.acquisition_queue),
             "acquired_pages": len(state.acquired_pages), "job_detail_pages": len(state.job_detail_pages),
             "prepared_jobs": len(state.prepared_jobs), "understanding_records": len(state.understanding_records),
             "match_assessments": len(state.match_assessments), "errors": len(state.errors)}

@@ -11,6 +11,7 @@ from langgraph.types import StateSnapshot
 from pydantic import BaseModel, Field
 
 from job_radar.agent.actions import execute_action
+from job_radar.agent.action_names import AgentActionName
 from job_radar.agent.controllers import Controller, RuleBasedController
 from job_radar.agent.controllers.llm_controller.outcome_summary import ActionOutcomeSummarizer
 from job_radar.agent.graph import build_agent_graph
@@ -25,8 +26,8 @@ from job_radar.services.runtime import create_real_agent_runtime
 
 class DecisionTraceEntry(BaseModel):
     step: int
-    available_actions: list[str] = Field(default_factory=list)
-    selected_action: str
+    available_actions: list[AgentActionName] = Field(default_factory=list)
+    selected_action: AgentActionName
     rationale: str
     state_summary: dict[str, Any] = Field(default_factory=dict)
 

@@ -133,7 +133,7 @@ def _run_web_search(state: AgentState, executor: ToolExecutor, limits: AgentLimi
         max_sources=limits.max_sources_per_round,
     )
     logger.info(
-        "search_round round_index=%s queries=%s executed_queries=%s new_urls=%s selected_sources=%s accepted_pages=%s stop_reason=%s",
+        "search_round round_index=%s queries=%s executed_queries=%s new_urls=%s queue_size_after_enqueue=%s accepted_pages=%s stop_reason=%s",
         state.round_index, state.search_plan.queries, queries,
         admission.enqueued_count, admission.queue_size_after_enqueue, 0, None,
     )
@@ -141,6 +141,8 @@ def _run_web_search(state: AgentState, executor: ToolExecutor, limits: AgentLimi
         "round_index": state.round_index + 1,
         "candidate_sources": all_candidates,
         "acquisition_queue": queue,
+        # selected_sources is retained as compatibility/history; the runtime
+        # acquisition backlog is acquisition_queue.
         "selected_sources": _merge_by_key(state.selected_sources, admission.enqueued_sources, lambda item: normalize_url(item.url)),
         "search_round_results": [*state.search_round_results, sources],
         "executed_queries": _merge_strings(state.executed_queries, queries),
@@ -237,6 +239,8 @@ def _run_explore_followups(state: AgentState, executor: ToolExecutor, limits: Ag
         ),
         "pending_followups": remaining,
         "acquisition_queue": queue,
+        # selected_sources is retained as compatibility/history; the runtime
+        # acquisition backlog is acquisition_queue.
         "selected_sources": _merge_by_key(
             state.selected_sources,
             result.sources,

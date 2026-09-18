@@ -111,6 +111,8 @@ class AgentState(BaseModel):
     extracted_page_urls: list[str] = Field(default_factory=list)
     pending_followups: list[PendingFollowup] = Field(default_factory=list)
     explored_followup_links: list[str] = Field(default_factory=list)
+    # History/debug only; runtime scheduling is derived from pending_followups
+    # and the canonical followup admission checks.
     processed_followup_urls: list[str] = Field(default_factory=list)
     followup_resolutions: list[dict[str, Any]] = Field(default_factory=list)
     rejected_pages: list[RejectedPage] = Field(default_factory=list)
@@ -130,11 +132,18 @@ class AgentState(BaseModel):
         """Keep old checkpoints usable while the queue becomes authoritative."""
 
         if not self.acquisition_queue and self.selected_sources:
-            handled = {page.url for page in self.acquired_pages}
-            handled.update(item.url for item in self.rejected_pages)
-            handled.update(error.url for error in self.errors if error.url)
+            from job_radar.tools.web_search.url_utils import normalize_url
+
+            def normalized(value: str) -> str:
+                return normalize_url(value)
+
+            handled = {normalized(page.url) for page in self.acquired_pages}
+            handled.update(normalized(item.url) for item in self.rejected_pages)
+            handled.update(normalized(error.url) for error in self.errors if error.url)
             self.acquisition_queue = [
-                source for source in self.selected_sources if source.url not in handled
+                source.model_copy(update={"url": normalized(source.url)})
+                for source in self.selected_sources
+                if normalized(source.url) not in handled
             ]
         return self
 

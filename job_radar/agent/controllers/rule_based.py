@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from job_radar.agent.action_names import AgentActionName
 from job_radar.agent.actions import AgentAction
 from job_radar.agent.controllers.base import Controller, DecisionContext
 from job_radar.agent.models import SearchOutcome
@@ -55,8 +56,7 @@ class RuleBasedController(Controller):
         raise ValueError("DecisionContext has no state-supported available action")
 
     @staticmethod
-    @staticmethod
-    def _action(action: str, state_reason: str) -> AgentAction:
+    def _action(action: AgentActionName, state_reason: str) -> AgentAction:
         return AgentAction(
             action=action,
             rationale=f"Rule-based baseline selected {action}: {state_reason}.",

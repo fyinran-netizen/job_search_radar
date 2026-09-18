@@ -8,7 +8,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from pypinyin import lazy_pinyin
 
 CHINA_CITIES_PATH = Path(__file__).with_name("data") / "china_cities.json"
 _SEPARATORS = re.compile(r"\s*(?:[,，;；/\\|])\s*")
@@ -145,7 +144,6 @@ def _aliases(name: str, row: dict[str, Any]) -> tuple[str, ...]:
         aliases = [aliases]
     values = list(aliases) if isinstance(aliases, list) else []
     values.extend(row[key] for key in ("pinyin", "english", "en") if row.get(key))
-    values.append("".join(lazy_pinyin(_strip_suffix(name), errors="keep")))
     return tuple(str(value).strip() for value in values if str(value).strip())
 
 

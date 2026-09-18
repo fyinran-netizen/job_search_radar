@@ -11,7 +11,7 @@ class CommonObservation(BaseModel):
     available_actions: list[AgentActionName]
     last_action: AgentActionName | None = None
     last_action_summary: str | None = None
-    stage: str | None = None
+    stage: AgentActionName | None = None
     round_index: int
     max_rounds: int
     profile_present: bool
@@ -62,7 +62,7 @@ class ControllerObservation(BaseModel):
     pages: PageObservation | None = None
     jobs: JobObservation | None = None
     followups: FollowupObservation | None = None
-    backlogs: dict[str, ActionBacklogObservation] = Field(default_factory=dict)
+    backlogs: dict[AgentActionName, ActionBacklogObservation] = Field(default_factory=dict)
 
 
 __all__ = [

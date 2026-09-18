@@ -17,6 +17,8 @@ def select_href_targets(
 ) -> tuple[list[CandidateSource], list[str], list[FollowupResolution]]:
     """Select new HTTP(S) hrefs in stable follow-up/link order."""
 
+    # Dedupe here is batch-local; enqueue_sources performs global admission
+    # against the acquisition queue and handled runtime URLs.
     excluded = normalized_url_set(excluded_urls or set())
     explored = normalized_url_set(explored_links or set())
     selected: list[CandidateSource] = []
