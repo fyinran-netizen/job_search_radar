@@ -342,7 +342,7 @@ def test_deterministic_match_bypasses_ai_for_graduation_year_mismatch() -> None:
 
     assert not result.should_call_ai
     assert result.hard_reject
-    assert assessment.analysis_source == "deterministic"
+    assert assessment.analysis_source == "deterministic_only"
     assert assessment.recommendation == "skip"
     assert assessment.match_score == 0
     assert "graduation_year_mismatch" in assessment.risk_flags
@@ -534,7 +534,7 @@ def test_semantic_match_analyzer_merges_deterministic_risks() -> None:
     )
     assessment = SemanticMatchAnalyzer(provider).analyze_understanding(record, job, profile)
 
-    assert assessment.analysis_source == "ai_with_deterministic_overrides"
+    assert assessment.analysis_source == "semantic_with_program_scoring"
     assert assessment.match_score == 87
     assert assessment.recommendation == "apply"
     assert assessment.confidence == "medium"

@@ -33,14 +33,14 @@ def build_final_assessment(
             missing_requirements=_unique(gate.missing_requirements),
             risk_flags=_risk_flags(job, gate.risk_flags),
             confidence="high",
-            analysis_source="deterministic",
+            analysis_source="deterministic_only",
             deterministic_reasons=list(gate.gate_reasons),
             score_components={"eligibility": 0},
             recommendation=gate.recommendation_override or "skip",
         )
 
     rubric = rubric or ScoringRubric()
-    components = score_components(job, understanding, semantic, profile, gate)
+    components = score_components(job, semantic, profile, gate)
     total_weight = sum(rubric.model_dump().values())
     weighted = sum(
         components[name] * weight
@@ -64,7 +64,7 @@ def build_final_assessment(
         recommendation=recommendation,
         # The score and recommendation are always program-owned, so every
         # semantic result has passed through deterministic aggregation.
-        analysis_source="ai_with_deterministic_overrides",
+        analysis_source="semantic_with_program_scoring",
         deterministic_reasons=list(gate.gate_reasons),
         score_components=components,
     )
@@ -72,7 +72,6 @@ def build_final_assessment(
 
 def score_components(
     job: JobRecord,
-    understanding: JobRequirementFacts | None,
     semantic: SemanticMatchAssessment,
     profile: UserProfile,
     gate: BasicGateResult,

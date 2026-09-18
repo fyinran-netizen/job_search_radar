@@ -151,6 +151,7 @@ def _dominant(
 def _fallback_summary(
     assessments: list[dict[str, Any]],
 ) -> str:
+    assessments = [_assessment_payload(item) for item in assessments]
     recommendation = _dominant(
         assessments,
         "recommendation",

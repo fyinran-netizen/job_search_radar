@@ -208,6 +208,29 @@ def test_match_analysis_summary_uses_deterministic_distributions_and_semantic_pr
     assert "required certification" in provider.prompts[-1]
 
 
+def test_match_analysis_fallback_unwraps_nested_assessment() -> None:
+    from job_radar.agent.controllers.llm_controller.outcome_summary.strategies.match_analysis import (
+        _fallback_summary,
+    )
+
+    summary = _fallback_summary([
+        {
+            "deduplication_key": "private-match-1",
+            "assessment": {
+                "recommendation": "apply",
+                "role_fit": "high",
+                "must_have_fit": "yes",
+                "confidence": "high",
+            },
+        }
+    ])
+
+    assert "recommendation is apply" in summary
+    assert "role fit is high" in summary
+    assert "must-have fit is yes" in summary
+    assert "confidence is high" in summary
+
+
 def test_controller_observation_carries_last_action_summary() -> None:
     state = AgentState(last_action_summary="The page yielded a plausible job detail for extraction.")
     context = DecisionContext(
