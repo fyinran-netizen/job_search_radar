@@ -4,7 +4,7 @@ import json
 
 from job_radar.agent.models import AgentState
 from job_radar.infra.llm.base import AIProvider
-from job_radar.tools.web_search.source_selection import normalize_url
+from job_radar.tools.web_search.url_utils import normalize_url
 from job_radar.agent.controllers.llm_controller.outcome_summary.common import (
     call_summary_llm,
     deterministic_summary,
@@ -26,7 +26,7 @@ def summarize(
         else []
     )
 
-    previous_urls = {
+    previous_discovered_urls = {
         normalize_url(source.url)
         for source in before.candidate_sources
     }
@@ -34,7 +34,7 @@ def summarize(
     new_sources = [
         source
         for source in round_sources
-        if normalize_url(source.url) not in previous_urls
+        if normalize_url(source.url) not in previous_discovered_urls
     ]
 
     duplicate_count = len(round_sources) - len(new_sources)

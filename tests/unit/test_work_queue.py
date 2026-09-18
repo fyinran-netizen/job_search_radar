@@ -1,5 +1,6 @@
-from job_radar.agent.models import AgentState
-from job_radar.agent.work_queue import enqueue_sources, take_source_batch
+from job_radar.agent.work_manager import get_pending_count, get_pending_work, take_action_batch
+from job_radar.agent.models import AgentLimits, AgentState
+from job_radar.agent.work_manager import enqueue_sources
 from job_radar.tools.page_acquisition.models import PageDocument
 from job_radar.tools.web_search.models import CandidateSource
 
@@ -18,7 +19,7 @@ def test_enqueue_normalizes_deduplicates_and_preserves_order() -> None:
     assert result.input_count == 3
     assert result.enqueued_count == 1
     assert result.duplicate_count == 2
-    assert result.skipped_count == 0
+    assert result.skipped_count == 2
 
 
 def test_enqueue_skips_handled_urls() -> None:
@@ -26,13 +27,28 @@ def test_enqueue_skips_handled_urls() -> None:
 
     assert queue == []
     assert result.skipped_count == 1
+    assert result.handled_count == 1
 
 
-def test_take_source_batch_leaves_remaining_queue() -> None:
-    batch, remaining = take_source_batch([source("https://example.test/1"), source("https://example.test/2")], 1)
+def test_admission_reports_each_skip_reason() -> None:
+    queue, result = enqueue_sources(
+        [source("https://example.test/duplicate")],
+        [
+            source("https://example.test/duplicate"),
+            source("https://example.test/handled"),
+            source(""),
+            source("https://example.test/limited"),
+        ],
+        handled_urls=["https://example.test/handled"],
+        max_sources=0,
+    )
 
-    assert [item.url for item in batch] == ["https://example.test/1"]
-    assert [item.url for item in remaining] == ["https://example.test/2"]
+    assert queue == [source("https://example.test/duplicate")]
+    assert result.duplicate_count == 1
+    assert result.handled_count == 1
+    assert result.invalid_count == 1
+    assert result.limited_count == 1
+    assert result.skipped_count == 4
 
 
 def test_checkpoint_round_trip_includes_acquisition_queue() -> None:
@@ -42,3 +58,19 @@ def test_checkpoint_round_trip_includes_acquisition_queue() -> None:
     )
 
     assert AgentState.model_validate(state.model_dump(mode="json")) == state
+
+
+def test_action_backlog_is_derived_from_artifacts_and_completion_markers() -> None:
+    state = AgentState(
+        acquired_pages=[
+            PageDocument(url="https://example.test/1", source_name="Example"),
+            PageDocument(url="https://example.test/2", source_name="Example"),
+        ],
+        analyzed_page_urls=["https://example.test/1"],
+    )
+
+    assert get_pending_count(state, "analyze_page") == 1
+    batch, remaining = take_action_batch(state, "analyze_page", AgentLimits().analyze_batch_size)
+    assert [page.url for page in batch] == ["https://example.test/2"]
+    assert remaining == []
+    assert get_pending_work(state, "acquire_page") == []

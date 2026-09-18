@@ -82,6 +82,28 @@ def test_web_search_advances_round_and_selects_sources():
     assert result.action_call_counts == {}
 
 
+def test_web_search_admits_raw_source_even_when_it_is_only_discovery_history():
+    source = CandidateSource(
+        url="https://example.test/job/1?utm_source=history",
+        title="Job 1",
+        source_name="Example",
+        relevance_score=90,
+    )
+    state = AgentState(
+        search_plan=SearchPlan(keywords=["graduate jobs"]),
+        candidate_sources=[source],
+    )
+
+    result = execute_action(
+        AgentAction(action="web_search", rationale="Admit raw search results"),
+        state,
+        ToolExecutor([RecordingSearchTool()]),
+        AgentLimits(),
+    )
+
+    assert [item.url for item in result.acquisition_queue] == ["https://example.test/job/1"]
+
+
 def test_limited_action_call_budget_is_checked_and_counted_once():
     url = "https://example.test/job"
     state = AgentState(

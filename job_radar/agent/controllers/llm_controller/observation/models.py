@@ -49,16 +49,25 @@ class FollowupObservation(BaseModel):
     post_extraction_count: int = 0
 
 
+class ActionBacklogObservation(BaseModel):
+    pending_count: int
+    executable_count: int
+    batch_size: int
+    available: bool
+
+
 class ControllerObservation(BaseModel):
     common: CommonObservation
     search: SearchObservation | None = None
     pages: PageObservation | None = None
     jobs: JobObservation | None = None
     followups: FollowupObservation | None = None
+    backlogs: dict[str, ActionBacklogObservation] = Field(default_factory=dict)
 
 
 __all__ = [
     "CommonObservation",
+    "ActionBacklogObservation",
     "ControllerObservation",
     "JobObservation",
     "FollowupObservation",

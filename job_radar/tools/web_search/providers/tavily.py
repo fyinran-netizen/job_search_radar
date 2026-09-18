@@ -12,7 +12,7 @@ from pydantic import BaseModel, TypeAdapter
 
 from job_radar.tools.base import BaseTool
 from job_radar.tools.web_search.models import CandidateSource, SearchPlan
-from job_radar.tools.web_search.source_selection import normalize_url
+from job_radar.tools.web_search.url_utils import normalize_url
 
 
 class TavilyWebSearchTool(BaseTool):

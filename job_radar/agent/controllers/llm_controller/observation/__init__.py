@@ -2,6 +2,7 @@
 
 from job_radar.agent.controllers.llm_controller.observation.builder import build_observation
 from job_radar.agent.controllers.llm_controller.observation.models import (
+    ActionBacklogObservation,
     CommonObservation,
     ControllerObservation,
     JobObservation,
@@ -11,6 +12,7 @@ from job_radar.agent.controllers.llm_controller.observation.models import (
 
 __all__ = [
     "CommonObservation",
+    "ActionBacklogObservation",
     "ControllerObservation",
     "JobObservation",
     "PageObservation",

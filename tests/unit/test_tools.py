@@ -19,7 +19,8 @@ from job_radar.tools.job_understanding.models import JobRequirementFacts, JobUnd
 from job_radar.tools.match_analysis.analyzer import SemanticMatchAnalyzer
 from job_radar.tools.search_plan import SearchPlanBuilder, SearchPlanLimits
 from job_radar.tools.search_plan import BuildSearchPlanTool, SearchPlanToolInput
-from job_radar.tools.web_search.source_selection import normalize_url, select_sources
+from job_radar.agent.work_manager import enqueue_sources
+from job_radar.tools.web_search.url_utils import normalize_url
 from job_radar.config import load_profile
 from job_radar.tools.job_extraction.models import BasicGateResult, RawJobRecord
 from job_radar.tools.web_search.models import CandidateSource, SearchPlan
@@ -198,7 +199,7 @@ def test_search_plan_builder_emits_one_query_per_role_up_to_limit() -> None:
     assert all(any(role in query for role in profile.target_roles) for query in plan.queries)
 
 
-def test_source_selection_keeps_low_score_aggregate_and_preserves_metadata() -> None:
+def test_work_admission_normalizes_and_preserves_metadata() -> None:
     source = CandidateSource(
         url="https://example.org/careers?utm_source=test",
         title="All opportunities",
@@ -207,9 +208,10 @@ def test_source_selection_keeps_low_score_aggregate_and_preserves_metadata() -> 
         is_official=False,
     )
 
-    selected = select_sources([source], min_relevance_score=99)
+    selected, admission = enqueue_sources([], [source], max_sources=10)
 
     assert selected == [source.model_copy(update={"url": "https://example.org/careers"})]
+    assert admission.enqueued_count == 1
 
 
 @pytest.mark.parametrize(
@@ -245,13 +247,15 @@ def test_tavily_executes_all_queries_within_budget_and_deduplicates(monkeypatch)
     assert len({normalize_url(source.url) for source in sources}) == len(sources)
 
 
-def test_source_selection_normalizes_and_deduplicates_urls_across_rounds() -> None:
+def test_work_admission_does_not_use_discovery_history_as_exclusion() -> None:
     source = CandidateSource(
         url="https://Careers.Example/job/1/?utm_source=test#top", title="Role",
         source_name="Example", is_official=True, relevance_score=90,
     )
+    queue, admission = enqueue_sources([], [source])
     assert normalize_url(source.url) == "https://careers.example/job/1"
-    assert select_sources([source], previous_urls={"https://careers.example/job/1"}) == []
+    assert [item.url for item in queue] == ["https://careers.example/job/1"]
+    assert admission.enqueued_count == 1
 
 
 def test_ollama_provider_parses_message_content_json(monkeypatch) -> None:

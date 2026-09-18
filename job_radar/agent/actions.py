@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from job_radar.agent.models import AgentError, AgentLimits, AgentState, SearchOutcome
 from job_radar.agent.action_names import AgentActionName
-from job_radar.agent.policies.availability import action_availability, _followup_excluded_urls
+from job_radar.agent.policies.availability import action_availability
 from job_radar.agent.transitions import stop_with_reason
 from job_radar.profile.models import UserProfile
 from job_radar.tools.executor import ToolExecutor
@@ -24,9 +24,8 @@ from job_radar.tools.match_analysis.tool import MatchAnalysisToolInput, MatchAna
 from job_radar.tools.page_analysis.tool import PageAnalysisInput, PageAnalysisOutput
 from job_radar.tools.web_search.models import CandidateSource
 from job_radar.tools.search_plan import SearchPlanToolInput, SearchPlan
-from job_radar.tools.web_search.source_selection import normalize_url, select_sources
-from job_radar.agent.work_queue import enqueue_sources, take_source_batch
-from job_radar.tools.explore_followups.common import normalized_http_url
+from job_radar.tools.web_search.url_utils import normalize_url
+from job_radar.agent.work_manager import enqueue_sources, get_followup_excluded_urls, take_action_batch
 from job_radar.infra.logging import get_logger
 
 logger = get_logger(__name__)
@@ -126,13 +125,12 @@ def _run_web_search(state: AgentState, executor: ToolExecutor, limits: AgentLimi
     if not isinstance(result, list):
         raise TypeError("web_search must return a list")
     sources = [item if isinstance(item, CandidateSource) else CandidateSource.model_validate(item) for item in result]
-    selected = select_sources(sources, max_sources=limits.max_sources_per_round)
     all_candidates = _merge_by_key(state.candidate_sources, sources, lambda item: normalize_url(item.url))
     queue, admission = enqueue_sources(
         state.acquisition_queue,
-        selected,
+        sources,
         handled_urls=_handled_source_urls(state),
-        known_urls=[source.url for source in state.candidate_sources],
+        max_sources=limits.max_sources_per_round,
     )
     logger.info(
         "search_round round_index=%s queries=%s executed_queries=%s new_urls=%s selected_sources=%s accepted_pages=%s stop_reason=%s",
@@ -168,7 +166,7 @@ def _run_build_search_plan(state: AgentState, executor: ToolExecutor, limits: Ag
 def _run_acquire_page(state: AgentState, executor: ToolExecutor, limits: AgentLimits) -> AgentState:
     pages = list(state.acquired_pages)
     errors = list(state.errors)
-    batch, remaining = take_source_batch(state.acquisition_queue, limits.acquire_batch_size)
+    batch, remaining = take_action_batch(state, "acquire_page", limits.acquire_batch_size)
     for source in batch:
         try:
             page = executor.run("acquire_page", source)
@@ -186,7 +184,7 @@ def _run_acquire_page(state: AgentState, executor: ToolExecutor, limits: AgentLi
 
 
 def _run_analyze_page(state: AgentState, executor: ToolExecutor, limits: AgentLimits) -> AgentState:
-    pages = _unprocessed_acquired_pages(state)[:limits.analyze_batch_size]
+    pages, _ = take_action_batch(state, "analyze_page", limits.analyze_batch_size)
     result = executor.run("analyze_page", PageAnalysisInput(pages=pages))
     if not isinstance(result, PageAnalysisOutput):
         result = PageAnalysisOutput.model_validate(result)
@@ -201,7 +199,7 @@ def _run_analyze_page(state: AgentState, executor: ToolExecutor, limits: AgentLi
 
 
 def _run_job_extraction(state: AgentState, executor: ToolExecutor, profile: UserProfile | None, limits: AgentLimits) -> AgentState:
-    pages = _unextracted_pages(state)[:limits.extraction_batch_size]
+    pages, _ = take_action_batch(state, "job_extraction", limits.extraction_batch_size)
     assert profile is not None
     result = executor.run("job_extraction", JobExtractionInput(pages=pages, profile=profile))
     if not isinstance(result, JobExtractionOutput):
@@ -215,12 +213,12 @@ def _run_job_extraction(state: AgentState, executor: ToolExecutor, profile: User
 
 
 def _run_explore_followups(state: AgentState, executor: ToolExecutor, limits: AgentLimits) -> AgentState:
-    pending = _select_followup_batch(state, limits.followup_batch_size)
+    pending, remaining = take_action_batch(state, "explore_followups", limits.followup_batch_size)
     result = executor.run(
         "explore_followups",
         ExploreFollowupsInput(
             pending_followups=pending,
-            excluded_urls=_followup_excluded_urls(state),
+            excluded_urls=get_followup_excluded_urls(state),
             explored_links=set(state.explored_followup_links),
         ),
     )
@@ -230,7 +228,6 @@ def _run_explore_followups(state: AgentState, executor: ToolExecutor, limits: Ag
         state.acquisition_queue,
         result.sources,
         handled_urls=_handled_source_urls(state),
-        known_urls=[source.url for source in state.candidate_sources],
     )
     return state.model_copy(update={
         "candidate_sources": _merge_by_key(
@@ -238,6 +235,7 @@ def _run_explore_followups(state: AgentState, executor: ToolExecutor, limits: Ag
             result.sources,
             lambda source: normalize_url(source.url),
         ),
+        "pending_followups": remaining,
         "acquisition_queue": queue,
         "selected_sources": _merge_by_key(
             state.selected_sources,
@@ -260,7 +258,7 @@ def _run_explore_followups(state: AgentState, executor: ToolExecutor, limits: Ag
 
 
 def _run_job_understanding(state: AgentState, executor: ToolExecutor, limits: AgentLimits) -> AgentState:
-    jobs = _ununderstood_jobs(state)[:limits.understanding_batch_size]
+    jobs, _ = take_action_batch(state, "job_understanding", limits.understanding_batch_size)
     result = executor.run("job_understanding", JobUnderstandingToolInput(jobs=jobs))
     if not isinstance(result, JobUnderstandingToolOutput):
         result = JobUnderstandingToolOutput.model_validate(result)
@@ -273,7 +271,7 @@ def _run_job_understanding(state: AgentState, executor: ToolExecutor, limits: Ag
 
 def _run_match_analysis(state: AgentState, executor: ToolExecutor, profile: UserProfile | None, limits: AgentLimits) -> AgentState:
     assert profile is not None
-    records = _unmatched_records(state)[:limits.match_batch_size]
+    records, _ = take_action_batch(state, "match_analysis", limits.match_batch_size)
     result = executor.run("match_analysis", MatchAnalysisToolInput(records=records, prepared_jobs=state.prepared_jobs, profile=profile))
     if not isinstance(result, MatchAnalysisToolOutput):
         result = MatchAnalysisToolOutput.model_validate(result)
@@ -284,45 +282,11 @@ def _run_match_analysis(state: AgentState, executor: ToolExecutor, profile: User
     })
 
 
-def _unprocessed_acquired_pages(state: AgentState) -> list[Any]:
-    completed = set(state.analyzed_page_urls)
-    return [page for page in state.acquired_pages if page.url not in completed]
-
-
-def _unextracted_pages(state: AgentState) -> list[Any]:
-    completed = set(state.extracted_page_urls)
-    return [page for page in state.job_detail_pages if page.url not in completed]
-
-
-def _ununderstood_jobs(state: AgentState) -> list[Any]:
-    completed = set(state.understood_job_keys)
-    return [job for job in state.prepared_jobs if job.deduplication_key not in completed]
-
-
-def _unmatched_records(state: AgentState) -> list[Any]:
-    completed = set(state.matched_job_keys)
-    return [record for record in state.understanding_records if record.deduplication_key not in completed]
-
-
 def _handled_source_urls(state: AgentState) -> set[str]:
     urls = {normalize_url(page.url) for page in state.acquired_pages}
     urls.update(normalize_url(item.url) for item in state.rejected_pages)
     urls.update(normalize_url(error.url) for error in state.errors if error.url)
     return urls
-
-
-def _select_followup_batch(state: AgentState, batch_size: int) -> list[Any]:
-    selected: list[Any] = []
-    processed = {normalize_url(url) for url in state.processed_followup_urls}
-    for item in state.pending_followups:
-        if len(selected) >= batch_size or item.pending_kind != "navigation_required":
-            continue
-        if normalize_url(item.url) in processed:
-            continue
-        if not any(normalized_http_url(link.get("href") or link.get("url")) for link in item.links):
-            continue
-        selected.append(item)
-    return selected
 
 
 def _merge_strings(existing: list[str], additions: list[str]) -> list[str]:

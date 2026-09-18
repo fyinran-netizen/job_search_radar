@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from job_radar.agent.controllers.base import DecisionContext
 from job_radar.agent.controllers.llm_controller.observation.models import (
+    ActionBacklogObservation,
     CommonObservation,
     ControllerObservation,
     FollowupObservation,
@@ -11,11 +12,14 @@ from job_radar.agent.controllers.llm_controller.observation.models import (
     PageObservation,
     SearchObservation,
 )
+from job_radar.agent.work_manager import (
+    BATCHED_ACTIONS,
+    get_action_batch_size,
+    get_executable_count,
+    is_followup_executable,
+    get_pending_count,
+)
 from job_radar.agent.models import AgentState
-from job_radar.tools.web_search.source_selection import normalize_url
-from job_radar.tools.explore_followups.strategies.href_navigation import has_executable_href
-
-
 def build_observation(context: DecisionContext) -> ControllerObservation:
     """Build only the sections relevant to the supplied action namespace."""
 
@@ -42,6 +46,15 @@ def build_observation(context: DecisionContext) -> ControllerObservation:
         pages=_build_page_observation(state) if available & {"acquire_page", "analyze_page", "job_extraction"} else None,
         jobs=_build_job_observation(state) if available & {"job_understanding", "match_analysis"} else None,
         followups=_build_followup_observation(state),
+        backlogs={
+            action: ActionBacklogObservation(
+                pending_count=get_pending_count(state, action),
+                executable_count=get_executable_count(state, action),
+                batch_size=get_action_batch_size(context.limits, action) or 0,
+                available=action in available,
+            )
+            for action in BATCHED_ACTIONS
+        },
     )
 
 
@@ -60,8 +73,8 @@ def _build_page_observation(state: AgentState) -> PageObservation:
     return PageObservation(
         acquired_page_count=len(state.acquired_pages),
         job_detail_page_count=len(state.job_detail_pages),
-        pages_to_analyze=max(0, len(state.acquired_pages) - len(state.analyzed_page_urls)),
-        pages_to_extract=max(0, len(state.job_detail_pages) - len(state.extracted_page_urls)),
+        pages_to_analyze=get_pending_count(state, "analyze_page"),
+        pages_to_extract=get_pending_count(state, "job_extraction"),
     )
 
 
@@ -69,8 +82,8 @@ def _build_job_observation(state: AgentState) -> JobObservation:
     return JobObservation(
         prepared_job_count=len(state.prepared_jobs),
         understanding_record_count=len(state.understanding_records),
-        jobs_to_understand=max(0, len(state.prepared_jobs) - len(state.understood_job_keys)),
-        records_to_match=max(0, len(state.understanding_records) - len(state.matched_job_keys)),
+        jobs_to_understand=get_pending_count(state, "job_understanding"),
+        records_to_match=get_pending_count(state, "match_analysis"),
     )
 
 
@@ -79,14 +92,9 @@ def _build_followup_observation(state: AgentState) -> FollowupObservation:
         item for item in state.pending_followups
         if item.pending_kind == "navigation_required"
     ]
-    excluded = _followup_observation_excluded_urls(state)
     executable = [
         item for item in navigation
-        if has_executable_href(
-            [item],
-            excluded_urls=excluded,
-            explored_links=state.explored_followup_links,
-        )
+        if is_followup_executable(state, item)
     ]
     return FollowupObservation(
         navigation_pending_count=len(navigation),
@@ -97,28 +105,10 @@ def _build_followup_observation(state: AgentState) -> FollowupObservation:
     )
 
 
-def _followup_observation_excluded_urls(state: AgentState) -> set[str]:
-    urls = {normalize_url(page.url) for page in state.acquired_pages}
-    urls.update(normalize_url(page.url) for page in state.job_detail_pages)
-    urls.update(normalize_url(source.url) for source in state.acquisition_queue)
-    urls.update(normalize_url(source.url) for source in state.candidate_sources)
-    urls.update(normalize_url(item.url) for item in state.rejected_pages)
-    urls.update(normalize_url(error.url) for error in state.errors if error.url)
-    return urls
-
-
 def _remaining_queries(state: AgentState) -> int:
     if state.search_plan is None:
         return 0
     return sum(query not in state.executed_queries for query in state.search_plan.queries)
-
-
-def _handled_source_count(state: AgentState) -> int:
-    handled = {normalize_url(page.url) for page in state.acquired_pages}
-    handled.update(normalize_url(item.url) for item in state.pending_followups)
-    handled.update(normalize_url(item.url) for item in state.rejected_pages)
-    handled.update(normalize_url(error.url) for error in state.errors if error.url)
-    return sum(normalize_url(source.url) in handled for source in state.acquisition_queue)
 
 
 __all__ = ["build_observation"]

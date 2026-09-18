@@ -2,7 +2,7 @@
 
 from urllib.parse import urlsplit
 
-from job_radar.tools.web_search.source_selection import normalize_url
+from job_radar.tools.web_search.url_utils import normalize_url
 
 
 def normalized_http_url(value: object) -> str | None:

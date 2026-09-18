@@ -10,9 +10,8 @@ from pydantic import BaseModel, Field
 
 from job_radar.agent.action_names import AGENT_ACTION_NAMES, AgentActionName
 from job_radar.agent.models import AgentLimits, AgentState, SearchOutcome
+from job_radar.agent.work_manager import get_executable_count, get_pending_work
 from job_radar.profile.models import UserProfile
-from job_radar.tools.explore_followups.strategies.href_navigation import has_executable_href
-from job_radar.tools.web_search.source_selection import normalize_url
 
 
 class ActionAvailability(BaseModel):
@@ -65,34 +64,29 @@ def action_availability(
     elif action == "analyze_page":
         if not state.acquired_pages:
             reasons.append("acquired_pages is empty")
-        elif not _unprocessed_acquired_pages(state):
+        elif not get_pending_work(state, action):
             reasons.append("all acquired_pages are already processed")
     elif action == "job_extraction":
         if profile is None:
             reasons.append("profile is required by job_extraction")
         if not state.job_detail_pages:
             reasons.append("job_detail_pages is empty")
-        elif not _unextracted_pages(state):
+        elif not get_pending_work(state, action):
             reasons.append("all job_detail_pages are already extracted")
         if len(state.prepared_jobs) >= limits.max_results:
             reasons.append("max_results reached")
     elif action == "explore_followups":
-        if not has_executable_href(
-            state.pending_followups,
-            excluded_urls=_followup_excluded_urls(state),
-            explored_links=state.explored_followup_links,
-            processed_followup_urls=state.processed_followup_urls,
-        ):
+        if get_executable_count(state, action) == 0:
             reasons.append("no unresolved navigation followup has a new executable href")
     elif action == "job_understanding":
         if not state.prepared_jobs:
             reasons.append("prepared_jobs is empty")
-        elif not _ununderstood_jobs(state):
+        elif not get_pending_work(state, action):
             reasons.append("all prepared_jobs are already understood")
     elif action == "match_analysis":
         if not state.understanding_records:
             reasons.append("understanding_records is empty")
-        elif not _unmatched_records(state):
+        elif not get_pending_work(state, action):
             reasons.append("all understanding_records are already matched")
         if profile is None:
             reasons.append("profile is required by match_analysis")
@@ -119,45 +113,8 @@ def available_actions(
     ]
 
 
-def _state_urls(state: AgentState) -> set[str]:
-    urls = {normalize_url(page.url) for page in state.acquired_pages}
-    urls.update(normalize_url(item.url) for item in state.pending_followups)
-    urls.update(normalize_url(item.url) for item in state.rejected_pages)
-    urls.update(normalize_url(error.url) for error in state.errors if error.url)
-    return urls
-
-
-def _followup_excluded_urls(state: AgentState) -> set[str]:
-    """URLs that follow-up exploration must never enqueue again."""
-
-    urls = _state_urls(state)
-    urls.update(normalize_url(source.url) for source in state.acquisition_queue)
-    urls.update(normalize_url(source.url) for source in state.candidate_sources)
-    return urls
-
-
 def _plan_has_unexecuted_queries(state: AgentState) -> bool:
     return bool(state.search_plan and any(q not in state.executed_queries for q in state.search_plan.queries))
-
-
-def _unprocessed_acquired_pages(state: AgentState) -> list[Any]:
-    completed = set(state.analyzed_page_urls)
-    return [page for page in state.acquired_pages if page.url not in completed]
-
-
-def _unextracted_pages(state: AgentState) -> list[Any]:
-    completed = set(state.extracted_page_urls)
-    return [page for page in state.job_detail_pages if page.url not in completed]
-
-
-def _ununderstood_jobs(state: AgentState) -> list[Any]:
-    completed = set(state.understood_job_keys)
-    return [job for job in state.prepared_jobs if job.deduplication_key not in completed]
-
-
-def _unmatched_records(state: AgentState) -> list[Any]:
-    completed = set(state.matched_job_keys)
-    return [record for record in state.understanding_records if record.deduplication_key not in completed]
 
 
 def _has_stop_evidence(state: AgentState, limits: AgentLimits) -> bool:

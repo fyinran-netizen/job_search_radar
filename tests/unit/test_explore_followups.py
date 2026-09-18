@@ -1,19 +1,21 @@
 from job_radar.agent.controllers.base import DecisionContext
 from job_radar.agent.controllers.llm_controller.observation.builder import build_observation
-from job_radar.agent.models import AgentLimits, AgentState
+from job_radar.agent.models import AgentError, AgentLimits, AgentState
 from job_radar.agent.actions import AgentAction, execute_action
+from job_radar.agent.work_manager import get_executable_count, is_followup_executable, take_action_batch
 from job_radar.agent.policies.availability import action_availability
 from job_radar.agent.policies.transition import transition_allowed_actions
 from job_radar.tools.explore_followups.models import ExploreFollowupsInput
 from job_radar.tools.explore_followups.tool import ExploreFollowupsTool
 from job_radar.tools.page_analysis.models import PendingFollowup
 from job_radar.tools.executor import ToolExecutor
+from job_radar.tools.page_acquisition.models import PageDocument, RejectedPage
 from job_radar.tools.web_search.models import CandidateSource
 
 
-def followup(*, kind: str = "navigation_required", stage: str = "pre_extraction", links=None, priority: int = 80) -> PendingFollowup:
+def followup(*, kind: str = "navigation_required", stage: str = "pre_extraction", links=None, priority: int = 80, url: str = "https://example.test/careers") -> PendingFollowup:
     return PendingFollowup(
-        url="https://example.test/careers",
+        url=url,
         title="Example careers",
         source_name="Example",
         company_name="Example Co",
@@ -127,6 +129,64 @@ def test_action_updates_selected_sources_and_explored_state() -> None:
     assert action_availability("explore_followups", result, AgentLimits()).available is False
 
 
+def test_action_consumes_only_three_followups_and_second_call_handles_remaining() -> None:
+    pending = [
+        followup(url=f"https://example.test/careers/{index}", links=[{"url": f"https://example.test/jobs/{index}"}])
+        for index in range(5)
+    ]
+    executor = ToolExecutor([ExploreFollowupsTool()])
+    limits = AgentLimits(followup_batch_size=3)
+
+    first = execute_action(
+        AgentAction(action="explore_followups", rationale="Process followup batch"),
+        AgentState(pending_followups=pending), executor, limits,
+    )
+    assert len(first.pending_followups) == 2
+    assert [item.url for item in first.pending_followups] == [item.url for item in pending[3:]]
+
+    second = execute_action(
+        AgentAction(action="explore_followups", rationale="Process remaining followups"),
+        first, executor, limits,
+    )
+    assert second.pending_followups == []
+    assert len(second.processed_followup_urls) == 5
+
+
+def test_selected_followup_is_consumed_even_when_no_new_href_is_enqueued() -> None:
+    same_href = {"url": "https://example.test/jobs/shared"}
+    state = AgentState(
+        pending_followups=[
+            followup(url="https://example.test/careers/a", links=[same_href]),
+            followup(url="https://example.test/careers/b", links=[same_href]),
+        ]
+    )
+
+    result = execute_action(
+        AgentAction(action="explore_followups", rationale="Consume executable followups"),
+        state, ToolExecutor([ExploreFollowupsTool()]), AgentLimits(followup_batch_size=2),
+    )
+
+    assert result.pending_followups == []
+    assert [source.url for source in result.acquisition_queue] == ["https://example.test/jobs/shared"]
+
+
+def test_same_parent_url_different_followups_are_consumed_by_item_not_parent() -> None:
+    state = AgentState(
+        pending_followups=[
+            followup(stage="pre_extraction", links=[{"url": "https://example.test/jobs/pre"}]),
+            followup(stage="post_extraction", links=[{"url": "https://example.test/jobs/post"}]),
+        ]
+    )
+
+    result = execute_action(
+        AgentAction(action="explore_followups", rationale="Process one followup"),
+        state, ToolExecutor([ExploreFollowupsTool()]), AgentLimits(followup_batch_size=1),
+    )
+
+    assert len(result.pending_followups) == 1
+    assert result.pending_followups[0].stage == "post_extraction"
+
+
 def test_availability_requires_new_href_and_transitions_are_scoped() -> None:
     no_links = AgentState(pending_followups=[followup(links=[])])
     with_link = AgentState(pending_followups=[followup(links=[{"url": "https://example.test/jobs/1"}])])
@@ -135,6 +195,38 @@ def test_availability_requires_new_href_and_transitions_are_scoped() -> None:
     assert "explore_followups" in transition_allowed_actions("analyze_page")
     assert "explore_followups" in transition_allowed_actions("job_extraction")
     assert transition_allowed_actions("explore_followups") == ["acquire_page", "stop"]
+
+
+def test_followup_executable_semantics_are_shared_by_count_availability_and_batch() -> None:
+    def href_followup(url: str) -> PendingFollowup:
+        return followup(url=f"https://example.test/parent/{url.rsplit('/', 1)[-1]}", links=[{"url": url}])
+
+    queued = "https://example.test/queued"
+    acquired = "https://example.test/acquired"
+    rejected = "https://example.test/rejected"
+    errored = "https://example.test/errored"
+    explored = "https://example.test/explored"
+    executable = "https://example.test/executable"
+    state = AgentState(
+        pending_followups=[href_followup(url) for url in [queued, acquired, rejected, errored, explored, executable]],
+        acquisition_queue=[CandidateSource(url=queued, title="Queued", source_name="Example")],
+        acquired_pages=[PageDocument(url=acquired, source_name="Example")],
+        rejected_pages=[RejectedPage(url=rejected, source_name="Example", title="Rejected")],
+        errors=[AgentError(stage="acquire_page", url=errored, reason="failed")],
+        explored_followup_links=[explored],
+    )
+
+    assert get_executable_count(state, "explore_followups") == 1
+    assert is_followup_executable(state, state.pending_followups[-1])
+    assert not is_followup_executable(state, state.pending_followups[0])
+    batch, remaining = take_action_batch(state, "explore_followups", 1)
+    assert [item.links[0]["url"] for item in batch] == [executable]
+    assert len(remaining) == 5
+    assert action_availability("explore_followups", state, AgentLimits()).available is True
+
+    exhausted = state.model_copy(update={"pending_followups": state.pending_followups[:-1]})
+    assert get_executable_count(exhausted, "explore_followups") == 0
+    assert action_availability("explore_followups", exhausted, AgentLimits()).available is False
 
 
 def test_checkpoint_state_round_trips_explored_links() -> None:
@@ -165,3 +257,7 @@ def test_controller_observation_exposes_compact_followup_counts() -> None:
     assert observation.followups.high_priority_executable_count == 1
     assert observation.followups.pre_extraction_count == 1
     assert observation.followups.post_extraction_count == 1
+    assert observation.backlogs["explore_followups"].pending_count == 3
+    assert observation.backlogs["explore_followups"].executable_count == 1
+    assert observation.backlogs["explore_followups"].batch_size == 3
+    assert observation.backlogs["explore_followups"].available is True
