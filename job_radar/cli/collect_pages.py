@@ -12,14 +12,13 @@ from pydantic import TypeAdapter, ValidationError
 
 from job_radar.tools.web_search.models import CandidateSource, SearchPlan
 from job_radar.tools.page_acquisition.models import PageDocument
-from job_radar.tools.page_acquisition.technical_triage import (
+from job_radar.tools.page_analysis.triage import (
     RejectedPage,
     triage_pages,
     summarize_page_signals,
 )
 from job_radar.tools.page_analysis.models import PendingFollowup
-from job_radar.tools.page_acquisition.http import HttpPageTool
-from job_radar.tools.page_analysis.cleaning import parse_acquired_page
+from job_radar.tools.page_acquisition.pipeline import PageAcquisitionPipeline
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -63,13 +62,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Invalid input: {exc}", file=sys.stderr)
         return 2
 
-    tool = HttpPageTool(timeout_seconds=args.timeout_seconds)
+    tool = PageAcquisitionPipeline(timeout_seconds=args.timeout_seconds)
     pages: list[PageDocument] = []
     pending_fetches: list[PendingFollowup] = []
     rejected_fetches: list[RejectedPage] = []
     for source in sources:
         try:
-            pages.append(parse_acquired_page(tool.run(source)))
+            pages.append(tool.run(source))
         except Exception as exc:
             if _is_pending_fetch_error(exc):
                 pending_fetches.append(

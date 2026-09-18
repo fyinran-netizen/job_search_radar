@@ -14,6 +14,7 @@ dependencies = [
     "langgraph>=0.6.0",
     "langgraph-checkpoint-sqlite>=2.0.0",
     "pypinyin>=0.55.0",
+    "playwright>=1.63.0",
 ]
 
 [dependency-groups]

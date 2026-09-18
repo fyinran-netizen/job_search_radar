@@ -34,12 +34,9 @@ class ValidationResult:
     ] = field(default_factory=list)
 
 
-REQUIRED_FIELDS = [
-    "company_name",
-    "title",
-    "locations",
-    "source_name",
-]
+# A title is the smallest reliable identifier for a job record.  Business
+# metadata is intentionally optional: extraction can enrich it later.
+REQUIRED_FIELDS = ["title"]
 
 
 ALLOWED_URL_SCHEMES = {
@@ -78,11 +75,6 @@ def validate_records(
                 ).strip()
             )
         ]
-
-        if not record.source_url:
-            missing.append(
-                "source_url"
-            )
 
         invalid: list[str] = []
 

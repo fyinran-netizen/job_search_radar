@@ -214,32 +214,27 @@ def _normalize_classification(
 ) -> PageSemanticClassification:
     """Enforce deterministic consistency between page type and next action."""
 
-    if (
-        classification.page_type
-        == "job_detail"
-    ):
-        return classification.model_copy(
-            update={
-                "suggested_next_action": (
-                    "extract_jobs"
-                )
-            }
-        )
+    next_action = _canonical_next_action(classification.page_type)
+    if classification.suggested_next_action == next_action:
+        return classification
+    return classification.model_copy(update={"suggested_next_action": next_action})
 
-    if (
-        classification
-        .suggested_next_action
-        == "extract_jobs"
-    ):
-        return classification.model_copy(
-            update={
-                "suggested_next_action": (
-                    "manual_review"
-                )
-            }
-        )
 
-    return classification
+def _canonical_next_action(page_type: PageSemanticType) -> SuggestedNextAction:
+    """Keep classifier output aligned with the existing routing semantics."""
+    actions: dict[PageSemanticType, SuggestedNextAction] = {
+        "job_detail": "extract_jobs",
+        "job_listing": "fetch_detail_links",
+        "role_list_without_jd": "find_detail_pages_for_role_titles",
+        "recruitment_program": "open_portal_and_find_job_detail_pages",
+        "career_home": "open_portal_and_find_job_detail_pages",
+        "apply_portal": "open_portal_and_find_job_detail_pages",
+        "access_or_interactive_page": "retry_with_browser_or_rendered_collection",
+        "document_or_brochure": "manual_review",
+        "irrelevant": "skip_until_more_context",
+        "uncertain": "manual_review",
+    }
+    return actions[page_type]
 
 
 def _pending_kind_from_page_type(
@@ -251,7 +246,7 @@ def _pending_kind_from_page_type(
     )
 
     if page_type == "job_listing":
-        return "job_listing_page"
+        return "job_listing"
 
     if page_type == "apply_portal":
         return (

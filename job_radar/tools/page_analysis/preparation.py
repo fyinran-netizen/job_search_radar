@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from urllib.parse import urlparse, urljoin
 
 from job_radar.tools.page_acquisition.models import PageDocument
-from job_radar.tools.page_analysis.cleaning import CleanedText, clean_page_text, parse_acquired_page
+from job_radar.tools.page_analysis.cleaning import CleanedText, clean_page_text
 from job_radar.tools.page_analysis.models import AIPageInput, ImportantLink, PageAnalysisTrace
 
 _VISIBLE_URL_PATTERN = re.compile(r"https?://[^\s<>\"']+")
@@ -45,10 +45,9 @@ def build_classification_excerpt(title: str, visible_text: str, max_chars: int =
 
 
 def prepare_page(page: PageDocument, max_text_chars: int = 12000, classification_max_chars: int = 6000) -> PreparedPage:
-    """Parse, clean, link-extract, and build one AI input exactly once."""
-    parsed = parse_acquired_page(page)
-    cleaned = clean_page_text(parsed.html, parsed.text, url=parsed.url, max_text_chars=max_text_chars)
-    ai_page = build_ai_page_input(parsed, cleaned)
+    """Prepare Analysis signals from an already acquired PageDocument."""
+    cleaned = clean_page_text(page.html, page.text, url=page.url, max_text_chars=max_text_chars)
+    ai_page = build_ai_page_input(page, cleaned)
     excerpt = build_classification_excerpt(ai_page.title, ai_page.visible_text, classification_max_chars)
     trace = PageAnalysisTrace(
         url=ai_page.url,
@@ -102,7 +101,7 @@ def extract_important_links(page: PageDocument, max_links: int = 10) -> list[Imp
         if item.url not in seen:
             found.append(item)
             seen.add(item.url)
-    priority = {"apply": 0, "attachment": 1, "source": 2, "other": 3}
+    priority = {"apply": 0, "job_detail_candidate": 1, "attachment": 2, "source": 3, "other": 4}
     return sorted(found, key=lambda item: priority[item.kind])[:max_links]
 
 
@@ -115,7 +114,19 @@ def _classify_link(url: str, text: str) -> ImportantLink | None:
         return ImportantLink(url=url, text=text, kind="apply", reason="apply_signal")
     if any(marker in lowered for marker in ("source", "original source", "来源")):
         return ImportantLink(url=url, text=text, kind="source", reason="source_signal")
+    if _looks_like_job_detail_link(path, lowered):
+        return ImportantLink(url=url, text=text, kind="job_detail_candidate", reason="job_detail_path_or_label")
     return None
+
+
+def _looks_like_job_detail_link(path: str, text: str) -> bool:
+    """Keep links whose label/path is a conservative detail-page signal."""
+    detail_labels = ("job details", "view job", "view position", "详情", "职位详情", "查看职位")
+    if any(marker in text for marker in detail_labels):
+        return True
+    segments = {segment for segment in path.split("/") if segment}
+    detail_segments = {"job", "jobs", "position", "positions", "vacancy", "vacancies", "role", "roles"}
+    return bool(segments & detail_segments) and not any(marker in path for marker in ("apply", "search", "filter"))
 
 
 def _extract_visible_text_links(text: str) -> list[ImportantLink]:

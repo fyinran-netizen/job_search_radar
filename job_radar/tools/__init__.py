@@ -5,8 +5,9 @@ from job_radar.tools.executor import ToolExecutor
 from job_radar.tools.job_extraction.tool import JobExtractionTool
 from job_radar.tools.job_understanding.tool import JobUnderstandingTool
 from job_radar.tools.match_analysis.tool import MatchAnalysisTool
-from job_radar.tools.page_acquisition.http import HttpPageTool
-from job_radar.tools.page_acquisition.browser import BrowserPageTool
+from job_radar.tools.page_acquisition.pipeline import BrowserPageTool, PageAcquisitionPipeline
+
+HttpPageTool = PageAcquisitionPipeline
 from job_radar.tools.page_acquisition.mock import MockPageTool
 from job_radar.tools.page_analysis.tool import (
     PageAnalysisInput,
@@ -28,6 +29,7 @@ __all__ = [
     "BrowserPageTool",
     "BuildSearchPlanTool",
     "HttpPageTool",
+    "PageAcquisitionPipeline",
     "JobExtractionTool",
     "JobUnderstandingTool",
     "ManualSourceTool",

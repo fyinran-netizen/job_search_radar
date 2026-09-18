@@ -5,7 +5,7 @@ from job_radar.tools.executor import ToolExecutor
 from job_radar.tools.job_extraction.tool import JobExtractionTool
 from job_radar.tools.job_understanding.tool import JobUnderstandingTool
 from job_radar.tools.match_analysis.tool import MatchAnalysisTool
-from job_radar.tools.page_acquisition.http import HttpPageTool
+from job_radar.tools.page_acquisition.pipeline import PageAcquisitionPipeline
 from job_radar.tools.page_acquisition.mock import MockPageTool
 from job_radar.tools.page_analysis.tool import PageAnalysisTool
 from job_radar.tools.search_plan import BuildSearchPlanTool
@@ -36,7 +36,7 @@ def create_manual_http_tool_executor(
         [
             BuildSearchPlanTool(),
             ManualSourceTool(sources),
-            HttpPageTool(),
+            PageAcquisitionPipeline(),
         ]
     )
 
@@ -56,7 +56,7 @@ def create_real_search_tool_executor(
             TavilyWebSearchTool(
                 max_sources=max_sources
             ),
-            HttpPageTool(),
+            PageAcquisitionPipeline(),
             PageAnalysisTool(
                 provider=analyze_page_provider
             ),

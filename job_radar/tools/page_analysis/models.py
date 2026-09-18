@@ -10,7 +10,7 @@ class ImportantLink(BaseModel):
 
     url: str
     text: str = ""
-    kind: Literal["attachment", "apply", "source", "other"] = "other"
+    kind: Literal["attachment", "apply", "source", "job_detail_candidate", "other"] = "other"
     reason: str = ""
 
 
@@ -59,22 +59,15 @@ PageSemanticType = Literal[
 PendingKind = Literal[
     "official_apply_portal",
     "apply_portal",
-    "job_listing_page",
     "job_listing",
     "recruitment_program",
     "career_home",
     "role_list_without_jd",
-    "campus_brochure_or_notice",
     "document_or_brochure",
-    "access_or_interactive_page",
     "irrelevant",
     "uncertain",
-    "javascript_rendered_or_hidden_content",
     "auth_or_interactive_required",
-    "insufficient_visible_text",
     "needs_detail_page",
-    "not_job_detail_page",
-    "anti_bot_or_rate_limited",
     "semantic_classification_failed",
     "no_jobs_extracted",
     "unknown_but_potentially_relevant",

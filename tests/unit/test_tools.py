@@ -27,7 +27,7 @@ from job_radar.tools.web_search.config import load_candidate_sources
 from job_radar.profile.models import UserProfile
 from job_radar.tools.page_acquisition.models import PageDocument
 from job_radar.tools.page_analysis.cleaning import clean_page_text
-from job_radar.tools.page_acquisition.technical_triage import triage_pages
+from job_radar.tools.page_analysis.triage import triage_pages
 from job_radar.tools.job_extraction.quality import triage_extracted_page
 from job_radar.tools.job_extraction.backend_gate.gate import evaluate_basic_gate
 from job_radar.tools.match_analysis.deterministic import evaluate_deterministic_match
@@ -413,6 +413,38 @@ def test_basic_gate_rejects_explicit_graduation_window_mismatch() -> None:
     assert "graduation_window_mismatch" in result.risk_flags
 
 
+def test_basic_gate_continues_with_missing_location_and_education() -> None:
+    job = make_prepared_job(locations=[], education_levels=[])
+    profile = UserProfile(graduation_date="2026-06", education="bachelor")
+
+    result = evaluate_basic_gate(job, profile)
+
+    assert result.should_continue
+    assert not result.hard_reject
+    assert "location_unknown" in result.risk_flags
+    assert "education_requirement_unknown" in result.risk_flags
+
+
+def test_basic_gate_rejects_explicit_education_mismatch() -> None:
+    job = make_prepared_job(education_levels=["master"])
+    profile = UserProfile(graduation_date="2026-06", education="bachelor")
+
+    result = evaluate_basic_gate(job, profile)
+
+    assert result.hard_reject
+    assert "education_level_mismatch" in result.risk_flags
+
+
+def test_basic_gate_rejects_fully_excluded_locations() -> None:
+    job = make_prepared_job(locations=["Sydney"])
+    profile = UserProfile(graduation_date="2026-06", excluded_locations=["Sydney"])
+
+    result = evaluate_basic_gate(job, profile)
+
+    assert result.hard_reject
+    assert "excluded_location" in result.risk_flags
+
+
 def test_job_understanding_analyzer_returns_discipline_neutral_facts() -> None:
     job = make_prepared_job(
         title="Policy Graduate",
@@ -492,11 +524,11 @@ def test_semantic_match_analyzer_merges_deterministic_risks() -> None:
 
     assessment = SemanticMatchAnalyzer(provider).analyze(job, profile)
 
-    assert assessment.analysis_source == "ai"
+    assert assessment.analysis_source == "ai_with_deterministic_overrides"
     assert assessment.match_score == 96
     assert assessment.recommendation == "apply"
-    assert assessment.confidence == "high"
-    assert assessment.risk_flags == ["vague_tech_stack"]
+    assert assessment.confidence == "medium"
+    assert assessment.risk_flags == ["deadline_unknown", "education_requirement_unknown", "location_unknown", "vague_tech_stack"]
     assert provider.prompts
     assert "You are Job Radar's semantic match analysis component." in provider.prompts[0]
     assert '"candidate_profile"' in provider.prompts[1]
@@ -736,7 +768,7 @@ def test_extraction_triage_marks_small_sparse_role_list_pending() -> None:
     assert pending.role_titles == ["Motion Control Algorithm Engineer", "Agent Developer"]
 
 
-def test_extraction_triage_keeps_undisclosed_randstad_employer_pending() -> None:
+def test_extraction_triage_allows_standard_jd_without_employer_name() -> None:
     page_input = AIPageInput(
         url="https://randstad.example/job/1",
         source_name="Randstad",
@@ -748,6 +780,8 @@ def test_extraction_triage_keeps_undisclosed_randstad_employer_pending() -> None
         [
             RawJobRecord(
                 title="Software Engineer",
+                description="Build and maintain software services.",
+                requirements="Python and distributed systems experience.",
                 location="Sydney",
                 source_url=page_input.url,
                 source_name="Randstad",
@@ -755,10 +789,7 @@ def test_extraction_triage_keeps_undisclosed_randstad_employer_pending() -> None
         ],
     )
 
-    assert pending is not None
-    assert pending.pending_kind == "uncertain"
-    assert pending.suggested_next_action == "manual_review"
-    assert pending.company_name is None
+    assert pending is None
 
 
 def test_build_ai_page_input_preserves_provenance_but_drops_search_scoring() -> None:
@@ -883,6 +914,51 @@ def test_clean_page_text_prefers_trafilatura_html() -> None:
     assert cleaned.method == "trafilatura"
     assert "Responsibilities include SQL dashboards" in cleaned.text
     assert "Bad fallback text" not in cleaned.text
+
+
+def test_extract_important_links_keeps_conservative_job_detail_candidates() -> None:
+    page = PageDocument(
+        url="https://careers.example/jobs",
+        source_name="Example Careers",
+        text="Several roles are listed below.",
+        metadata={
+            "links": [
+                {"href": "/jobs/data-analyst-123", "text": "Data Analyst"},
+                {"href": "/about", "text": "About us"},
+                {"href": "/apply", "text": "Apply"},
+            ]
+        },
+    )
+
+    links = extract_important_links(page)
+
+    assert [(link.kind, link.url) for link in links] == [
+        ("apply", "https://careers.example/apply"),
+        ("job_detail_candidate", "https://careers.example/jobs/data-analyst-123"),
+    ]
+
+
+def test_semantic_classifier_normalizes_action_to_page_type() -> None:
+    provider = MockAIProvider(
+        {
+            "page_type": "job_listing",
+            "suggested_next_action": "extract_jobs",
+            "reasons": ["multiple roles"],
+            "evidence": ["job detail links"],
+            "confidence": "high",
+        }
+    )
+    classification = PageSemanticClassifier(provider).classify(
+        AIPageInput(
+            url="https://careers.example/jobs",
+            title="Jobs",
+            visible_text="Data Analyst\nSoftware Engineer",
+        )
+    )
+
+    assert classification.suggested_next_action == "fetch_detail_links"
+    assert "job_listing" in provider.prompts[0]
+    assert "Never fetch" in provider.prompts[0]
 
 
 def test_ai_job_extraction_client_prompts_with_minimal_page_input() -> None:

@@ -88,7 +88,7 @@ def test_validation_rejects_invalid_job() -> None:
     assert "title" in result.errors[0].reason
 
 
-def test_validation_rejects_missing_location() -> None:
+def test_validation_allows_missing_location() -> None:
     record = RawJobRecord(
         company_name="Example",
         title="Graduate Analyst",
@@ -99,9 +99,17 @@ def test_validation_rejects_missing_location() -> None:
 
     validation = validate_records([record])
 
-    assert validation.valid_records == []
-    assert len(validation.errors) == 1
-    assert "location" in validation.errors[0].reason
+    assert validation.errors == []
+    assert validation.valid_records == [record]
+
+
+def test_validation_allows_missing_company_and_source_name() -> None:
+    record = RawJobRecord(title="Graduate Analyst")
+
+    validation = validate_records([record])
+
+    assert validation.errors == []
+    assert validation.valid_records == [record]
 
 
 def test_validation_rejects_invalid_source_url_and_dates() -> None:
