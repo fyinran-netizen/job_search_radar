@@ -14,6 +14,7 @@ from job_radar.tools.page_analysis.tool import (
     PageAnalysisOutput,
     PageAnalysisTool,
 )
+from job_radar.tools.explore_followups.tool import ExploreFollowupsTool
 from job_radar.tools.registry import (
     create_manual_http_tool_executor,
     create_mock_tool_executor,
@@ -42,6 +43,7 @@ __all__ = [
     "PageAnalysisInput",
     "PageAnalysisOutput",
     "PageAnalysisTool",
+    "ExploreFollowupsTool",
     "ToolExecutor",
     "create_manual_http_tool_executor",
     "create_mock_tool_executor",

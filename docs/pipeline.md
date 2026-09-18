@@ -280,7 +280,7 @@ This is why the current project should avoid growing page-specific parsing rules
 | Mock page acquisition | `MockPageTool` | `CandidateSource` | `PageDocument` | Simulate fetching page text. No network requests. |
 | HTTP page acquisition | `HttpPageTool` | `CandidateSource` | `PageDocument` | Fetch one explicitly configured URL, detect JS shells, recover embedded content, and use the browser fallback when required. |
 | Page analysis | `PageAnalysisTool` | `PageDocument` | cleaned/classified pages and quality outcomes | Clean acquired content, run quality checks, and perform semantic classification. It does not access the network or recover pages. |
-| Semantic page routing | `PageSemanticClassifier` / `PageClassificationTool` | `AIPageInput` | job-detail pages and pending follow-ups | AI-owned Stage 2 routing for page types such as job detail, listing, portal, recruitment program, career home, and irrelevant. |
+| Semantic page routing | `PageSemanticClassifier` / `PageClassificationTool` | `AIPageInput` | job-detail pages and pending follow-ups | AI-owned Stage 2 page typing; non-detail types are mapped to coarse `PendingFollowup.pending_kind` values while page type and routing hints remain in classification/evidence. |
 | Job extraction | `RuleBasedJobExtractor` | `PageDocument` | `RawJobRecord` list | Convert marker text or simple JD detail pages into raw job records. No LLM API call is made. |
 | Future LLM extraction | `LLMJobExtractor` plus concrete `LLMClient` | `PageDocument` | `RawJobRecord` list | Future replacement for rule-based extraction when page formats become too varied for deterministic parsing. |
 | Validation | `validate_records` | `RawJobRecord` list | Valid records and errors | Reject records missing required fields. |

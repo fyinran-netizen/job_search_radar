@@ -156,7 +156,7 @@ def _pending_followup_for_error(page: AIPageInput, exc: Exception) -> PendingFol
         company_name=page.source_company_name,
         company_type=page.company_type,
         is_official=page.is_official,
-        pending_kind="unknown_but_potentially_relevant",
+        pending_kind="review_required",
         reasons=[f"classification_error: {exc}"],
         evidence={"text_length": len(page.visible_text)},
         suggested_next_action="manual_review",

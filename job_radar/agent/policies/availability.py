@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from job_radar.agent.action_names import AGENT_ACTION_NAMES, AgentActionName
 from job_radar.agent.models import AgentLimits, AgentState, SearchOutcome
 from job_radar.profile.models import UserProfile
+from job_radar.tools.explore_followups.strategies.href_navigation import has_executable_href
 from job_radar.tools.web_search.source_selection import normalize_url
 
 
@@ -79,6 +80,13 @@ def action_availability(
             reasons.append("all job_detail_pages are already extracted")
         if len(state.prepared_jobs) >= limits.max_results:
             reasons.append("max_results reached")
+    elif action == "explore_followups":
+        if not has_executable_href(
+            state.pending_followups,
+            excluded_urls=_followup_excluded_urls(state),
+            explored_links=state.explored_followup_links,
+        ):
+            reasons.append("no unresolved navigation followup has a new executable href")
     elif action == "job_understanding":
         if not state.prepared_jobs:
             reasons.append("prepared_jobs is empty")
@@ -124,6 +132,15 @@ def _state_urls(state: AgentState) -> set[str]:
     urls.update(normalize_url(item.url) for item in state.pending_followups)
     urls.update(normalize_url(item.url) for item in state.rejected_pages)
     urls.update(normalize_url(error.url) for error in state.errors if error.url)
+    return urls
+
+
+def _followup_excluded_urls(state: AgentState) -> set[str]:
+    """URLs that follow-up exploration must never enqueue again."""
+
+    urls = _state_urls(state)
+    urls.update(normalize_url(source.url) for source in state.selected_sources)
+    urls.update(normalize_url(source.url) for source in state.candidate_sources)
     return urls
 
 

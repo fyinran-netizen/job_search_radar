@@ -11,6 +11,7 @@ from job_radar.infra.llm.structured_output import validate_model
 from job_radar.tools.page_analysis.models import (
     AIPageInput,
     PageSemanticType,
+    PendingKind,
     PendingFollowup,
     SuggestedNextAction,
 )
@@ -165,7 +166,6 @@ def pending_followup_from_semantic_classification(
         ),
         pending_kind=(
             _pending_kind_from_page_type(
-                page,
                 classification,
             )
         ),
@@ -238,30 +238,28 @@ def _canonical_next_action(page_type: PageSemanticType) -> SuggestedNextAction:
 
 
 def _pending_kind_from_page_type(
-    page: AIPageInput,
     classification: PageSemanticClassification,
-) -> str:
+) -> PendingKind:
     page_type = (
         classification.page_type
     )
 
-    if page_type == "job_listing":
-        return "job_listing"
-
-    if page_type == "apply_portal":
-        return (
-            "official_apply_portal"
-            if page.is_official
-            else "apply_portal"
-        )
-
-    if page_type == "document_or_brochure":
-        return "document_or_brochure"
+    if page_type in {
+        "job_listing",
+        "apply_portal",
+        "recruitment_program",
+        "career_home",
+        "role_list_without_jd",
+    }:
+        return "navigation_required"
 
     if page_type == "access_or_interactive_page":
-        return "auth_or_interactive_required"
+        return "recovery_required"
 
-    return page_type
+    if page_type == "irrelevant":
+        return "ignore"
+
+    return "review_required"
 
 
 def _next_action_for_page_type(

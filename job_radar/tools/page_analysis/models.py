@@ -57,20 +57,10 @@ PageSemanticType = Literal[
 ]
 
 PendingKind = Literal[
-    "official_apply_portal",
-    "apply_portal",
-    "job_listing",
-    "recruitment_program",
-    "career_home",
-    "role_list_without_jd",
-    "document_or_brochure",
-    "irrelevant",
-    "uncertain",
-    "auth_or_interactive_required",
-    "needs_detail_page",
-    "semantic_classification_failed",
-    "no_jobs_extracted",
-    "unknown_but_potentially_relevant",
+    "navigation_required",
+    "recovery_required",
+    "review_required",
+    "ignore",
 ]
 
 SuggestedNextAction = Literal[
@@ -85,7 +75,13 @@ SuggestedNextAction = Literal[
 
 
 class PendingFollowup(BaseModel):
-    """A useful but unresolved page for a later Agent decision."""
+    """A page that needs a coarse-grained follow-up decision.
+
+    ``pending_kind`` describes why the item remains unresolved at the
+    workflow level. Page semantics, extraction details, and routing guidance
+    stay in the other fields (especially ``evidence`` and
+    ``suggested_next_action``).
+    """
 
     url: str
     final_url: str | None = None

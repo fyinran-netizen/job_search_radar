@@ -13,11 +13,12 @@ from pydantic import BaseModel, Field, model_validator
 
 from job_radar.agent.models import AgentError, AgentLimits, AgentState, SearchOutcome
 from job_radar.agent.action_names import AgentActionName
-from job_radar.agent.policies.availability import action_availability, _executable_sources
+from job_radar.agent.policies.availability import action_availability, _executable_sources, _followup_excluded_urls
 from job_radar.agent.transitions import stop_with_reason
 from job_radar.profile.models import UserProfile
 from job_radar.tools.executor import ToolExecutor
 from job_radar.tools.job_extraction.tool import JobExtractionInput, JobExtractionOutput
+from job_radar.tools.explore_followups.models import ExploreFollowupsInput, ExploreFollowupsOutput
 from job_radar.tools.job_understanding.tool import JobUnderstandingToolInput, JobUnderstandingToolOutput
 from job_radar.tools.match_analysis.tool import MatchAnalysisToolInput, MatchAnalysisToolOutput
 from job_radar.tools.page_analysis.tool import PageAnalysisInput, PageAnalysisOutput
@@ -85,6 +86,8 @@ def execute_action(
         return _run_analyze_page(state, executor)
     if action.action == "job_extraction":
         return _run_job_extraction(state, executor, profile)
+    if action.action == "explore_followups":
+        return _run_explore_followups(state, executor)
     if action.action == "job_understanding":
         return _run_job_understanding(state, executor)
     return _run_match_analysis(state, executor, profile)
@@ -200,6 +203,39 @@ def _run_job_extraction(state: AgentState, executor: ToolExecutor, profile: User
         "extracted_page_urls": _merge_strings(state.extracted_page_urls, [page.url for page in pages]),
         "pending_followups": [*state.pending_followups, *result.pending_followups],
         "errors": [*state.errors, *_report_errors("job_extraction", result.report)],
+    })
+
+
+def _run_explore_followups(state: AgentState, executor: ToolExecutor) -> AgentState:
+    result = executor.run(
+        "explore_followups",
+        ExploreFollowupsInput(
+            pending_followups=state.pending_followups,
+            excluded_urls=_followup_excluded_urls(state),
+            explored_links=set(state.explored_followup_links),
+        ),
+    )
+    if not isinstance(result, ExploreFollowupsOutput):
+        result = ExploreFollowupsOutput.model_validate(result)
+    return state.model_copy(update={
+        "candidate_sources": _merge_by_key(
+            state.candidate_sources,
+            result.sources,
+            lambda source: normalize_url(source.url),
+        ),
+        "selected_sources": _merge_by_key(
+            state.selected_sources,
+            result.sources,
+            lambda source: normalize_url(source.url),
+        ),
+        "explored_followup_links": _merge_strings(
+            state.explored_followup_links,
+            result.explored_links,
+        ),
+        "followup_resolutions": [
+            *state.followup_resolutions,
+            *[item.model_dump(mode="json") for item in result.resolutions],
+        ],
     })
 
 

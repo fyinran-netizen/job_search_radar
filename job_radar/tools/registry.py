@@ -8,6 +8,7 @@ from job_radar.tools.match_analysis.tool import MatchAnalysisTool
 from job_radar.tools.page_acquisition.pipeline import PageAcquisitionPipeline
 from job_radar.tools.page_acquisition.mock import MockPageTool
 from job_radar.tools.page_analysis.tool import PageAnalysisTool
+from job_radar.tools.explore_followups.tool import ExploreFollowupsTool
 from job_radar.tools.search_plan import BuildSearchPlanTool
 from job_radar.tools.web_search.models import CandidateSource
 from job_radar.tools.web_search.providers.mock import MockWebSearchTool
@@ -23,6 +24,7 @@ def create_mock_tool_executor() -> ToolExecutor:
             BuildSearchPlanTool(),
             MockWebSearchTool(),
             MockPageTool(),
+            ExploreFollowupsTool(),
         ]
     )
 
@@ -37,6 +39,7 @@ def create_manual_http_tool_executor(
             BuildSearchPlanTool(),
             ManualSourceTool(sources),
             PageAcquisitionPipeline(),
+            ExploreFollowupsTool(),
         ]
     )
 
@@ -60,6 +63,7 @@ def create_real_search_tool_executor(
             PageAnalysisTool(
                 provider=analyze_page_provider
             ),
+            ExploreFollowupsTool(),
             JobExtractionTool(
                 job_extraction_provider
             ),

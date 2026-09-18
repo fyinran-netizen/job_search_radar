@@ -6,12 +6,14 @@ from job_radar.agent.controllers.base import DecisionContext
 from job_radar.agent.controllers.llm_controller.observation.models import (
     CommonObservation,
     ControllerObservation,
+    FollowupObservation,
     JobObservation,
     PageObservation,
     SearchObservation,
 )
 from job_radar.agent.models import AgentState
 from job_radar.tools.web_search.source_selection import normalize_url
+from job_radar.tools.explore_followups.strategies.href_navigation import has_executable_href
 
 
 def build_observation(context: DecisionContext) -> ControllerObservation:
@@ -39,6 +41,7 @@ def build_observation(context: DecisionContext) -> ControllerObservation:
         search=_build_search_observation(context) if available & {"build_search_plan", "web_search"} else None,
         pages=_build_page_observation(state) if available & {"acquire_page", "analyze_page", "job_extraction"} else None,
         jobs=_build_job_observation(state) if available & {"job_understanding", "match_analysis"} else None,
+        followups=_build_followup_observation(state),
     )
 
 
@@ -69,6 +72,39 @@ def _build_job_observation(state: AgentState) -> JobObservation:
         jobs_to_understand=max(0, len(state.prepared_jobs) - len(state.understood_job_keys)),
         records_to_match=max(0, len(state.understanding_records) - len(state.matched_job_keys)),
     )
+
+
+def _build_followup_observation(state: AgentState) -> FollowupObservation:
+    navigation = [
+        item for item in state.pending_followups
+        if item.pending_kind == "navigation_required"
+    ]
+    excluded = _followup_observation_excluded_urls(state)
+    executable = [
+        item for item in navigation
+        if has_executable_href(
+            [item],
+            excluded_urls=excluded,
+            explored_links=state.explored_followup_links,
+        )
+    ]
+    return FollowupObservation(
+        navigation_pending_count=len(navigation),
+        executable_followup_count=len(executable),
+        high_priority_executable_count=sum(item.priority >= 80 for item in executable),
+        pre_extraction_count=sum(item.stage == "pre_extraction" for item in navigation),
+        post_extraction_count=sum(item.stage == "post_extraction" for item in navigation),
+    )
+
+
+def _followup_observation_excluded_urls(state: AgentState) -> set[str]:
+    urls = {normalize_url(page.url) for page in state.acquired_pages}
+    urls.update(normalize_url(page.url) for page in state.job_detail_pages)
+    urls.update(normalize_url(source.url) for source in state.selected_sources)
+    urls.update(normalize_url(source.url) for source in state.candidate_sources)
+    urls.update(normalize_url(item.url) for item in state.rejected_pages)
+    urls.update(normalize_url(error.url) for error in state.errors if error.url)
+    return urls
 
 
 def _remaining_queries(state: AgentState) -> int:

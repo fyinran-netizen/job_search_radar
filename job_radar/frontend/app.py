@@ -342,7 +342,7 @@ def _render_checkpoint_state(entry: CheckpointHistoryEntry) -> None:
     list_fields = (
         "query_history", "executed_queries", "search_round_results",
         "candidate_sources", "selected_sources", "acquired_pages",
-        "job_detail_pages", "pending_followups", "rejected_pages", "page_analysis_traces", "prepared_jobs",
+        "job_detail_pages", "pending_followups", "explored_followup_links", "followup_resolutions", "rejected_pages", "page_analysis_traces", "prepared_jobs",
         "understanding_records", "match_assessments", "errors",
     )
     for field_name in list_fields:

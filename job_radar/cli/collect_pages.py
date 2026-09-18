@@ -77,13 +77,12 @@ def main(argv: list[str] | None = None) -> int:
                         source_name=source.source_name,
                         title=source.title,
                         reasons=[f"fetch_error: {exc}"],
-                        pending_kind="unknown_but_potentially_relevant",
+                        pending_kind="recovery_required",
                         suggested_next_action="manual_review",
-                        metadata={
-                            "company_name": source.company_name,
-                            "company_type": source.company_type,
-                            "is_official": source.is_official,
-                        },
+                        company_name=source.company_name,
+                        company_type=source.company_type,
+                        is_official=source.is_official,
+                        stage="collection",
                     )
                 )
             else:

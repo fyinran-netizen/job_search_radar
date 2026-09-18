@@ -55,6 +55,12 @@ ACTION_SEMANTICS: Final[dict[AgentActionName, ActionSemantics]] = {
         produces=["validated and deduplicated prepared jobs", "follow-up needs", "extraction or validation evidence"],
         progress_signal="A page yields a trustworthy job record that is eligible for evaluation, or is conclusively ruled out with a reason.",
     ),
+    "explore_followups": ActionSemantics(
+        purpose="Follow explicit navigation links from unresolved pages to discover more executable sources.",
+        consumes=["navigation-required pending follow-ups", "explicit HTTP(S) hrefs", "handled URL state"],
+        produces=["new candidate sources", "selected sources for acquisition", "follow-up exploration metadata"],
+        progress_signal="At least one previously unhandled href becomes a new source, or all explicit hrefs are exhausted.",
+    ),
     "job_understanding": ActionSemantics(
         purpose="Make the substantive requirements and signals of each prepared job explicit for matching.",
         consumes=["prepared jobs awaiting interpretation"],

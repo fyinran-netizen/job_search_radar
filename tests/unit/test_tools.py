@@ -15,7 +15,7 @@ from job_radar.tools.job_extraction.extraction import (
 from job_radar.tools.job_extraction.models import ImportantLink
 from job_radar.tools.page_analysis.semantic_classification import PageSemanticClassifier
 from job_radar.tools.job_understanding.analyzer import JobUnderstandingAnalyzer
-from job_radar.tools.job_understanding.models import JobUnderstandingRecord
+from job_radar.tools.job_understanding.models import JobRequirementFacts, JobUnderstandingRecord, RequirementFact
 from job_radar.tools.match_analysis.analyzer import SemanticMatchAnalyzer
 from job_radar.tools.search_plan import SearchPlanBuilder, SearchPlanLimits
 from job_radar.tools.search_plan import BuildSearchPlanTool, SearchPlanToolInput
@@ -551,6 +551,57 @@ def test_semantic_match_analyzer_merges_deterministic_risks() -> None:
     assert "match_score" not in provider.prompts[0]
 
 
+def test_match_analysis_prompt_projects_only_semantic_job_and_requirements() -> None:
+    job = make_prepared_job(
+        locations=["Sydney"],
+        education_levels=["Bachelor"],
+        deadline="2099-01-01",
+    )
+    understanding = JobRequirementFacts(
+        canonical_role="Data Analyst",
+        requirements=[
+            RequirementFact(category="other", text="Open to 2026 graduates"),
+            RequirementFact(category="other", text="Bachelor degree required"),
+            RequirementFact(category="availability", text="Application deadline is 2099-01-01"),
+            RequirementFact(category="other", text="Sydney location required"),
+            RequirementFact(category="technical_skill", text="Python and SQL"),
+            RequirementFact(category="domain_knowledge", text="Banking data analysis"),
+            RequirementFact(category="communication", text="Clear written communication"),
+            RequirementFact(category="experience", text="Relevant analytics experience"),
+        ],
+        confidence="high",
+    )
+    provider = MockAIProvider({
+        "role_fit": "high",
+        "must_have_fit": "partial",
+        "job_summary": "ignored legacy response field",
+        "confidence": "high",
+    })
+    profile = UserProfile(target_roles=["Data Analyst"], skills=["Python"])
+    record = JobUnderstandingRecord(
+        deduplication_key=job.deduplication_key,
+        basic_gate=job.basic_gate,
+        understanding=understanding,
+        source="ai",
+    )
+
+    SemanticMatchAnalyzer(provider).analyze_understanding(record, job, profile)
+    payload = json.loads(provider.prompts[1].split("Input:\n", 1)[1])
+
+    assert set(payload["job"]) == {"title", "description", "requirements", "recruitment_type"}
+    assert set(payload["candidate_profile"]) == {"education", "target_roles", "skills"}
+    projected_requirements = payload["job_understanding"]["requirements"]
+    assert [item["text"] for item in projected_requirements] == [
+        "Python and SQL",
+        "Banking data analysis",
+        "Clear written communication",
+        "Relevant analytics experience",
+    ]
+    assert [item.text for item in understanding.requirements] != [
+        item["text"] for item in projected_requirements
+    ]
+
+
 def test_parse_json_output_repairs_only_trailing_container_closures() -> None:
     dell_output = (
         '{"page_id":"page-1","page_context":{},"jobs":['
@@ -716,7 +767,7 @@ def test_page_semantic_classifier_routes_apply_portal() -> None:
     assert "allowed_page_types" in provider.prompts[0]
 
 
-def test_extraction_triage_marks_role_list_without_jd_pending() -> None:
+def test_extraction_triage_marks_sparse_role_list_navigation_pending() -> None:
     page_input = AIPageInput(
         url="https://career.example/list",
         source_name="Example Careers",
@@ -741,13 +792,13 @@ def test_extraction_triage_marks_role_list_without_jd_pending() -> None:
     pending = triage_extracted_page(page_input, records)
 
     assert pending is not None
-    assert pending.pending_kind == "role_list_without_jd"
+    assert pending.pending_kind == "navigation_required"
     assert pending.suggested_next_action == "find_detail_pages_for_role_titles"
     assert pending.evidence["extracted_job_count"] == 12
     assert len(pending.role_titles) == 12
 
 
-def test_extraction_triage_marks_small_sparse_role_list_pending() -> None:
+def test_extraction_triage_marks_small_sparse_role_list_navigation_pending() -> None:
     page_input = AIPageInput(
         url="https://career.example/notice",
         source_name="Example Careers",
@@ -779,7 +830,7 @@ def test_extraction_triage_marks_small_sparse_role_list_pending() -> None:
     pending = triage_extracted_page(page_input, records)
 
     assert pending is not None
-    assert pending.pending_kind == "role_list_without_jd"
+    assert pending.pending_kind == "navigation_required"
     assert pending.evidence["sparse_record_ratio"] == 1.0
     assert pending.role_titles == ["Motion Control Algorithm Engineer", "Agent Developer"]
 

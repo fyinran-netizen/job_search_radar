@@ -22,13 +22,14 @@ Return one JSON object matching the supplied semantic match schema.
 ## Analysis Rules
 
 1. Judge only role alignment and candidate requirement fit.
-2. Use only explicit evidence from the candidate profile, including stated target roles, skills, education, and experience.
-3. Use the supplied job understanding as the primary source of candidate requirements.
-4. Do not turn job responsibilities into candidate requirements.
-5. List `missing_requirements` only when a represented candidate requirement lacks supporting candidate evidence.
-6. Use `risk_flags` only for material semantic uncertainty or ambiguous evidence in the comparison.
-7. Keep `match_reasons` concise and evidence-based.
-8. Preserve uncertainty rather than guessing or strengthening unsupported evidence.
+2. Base all judgments on explicit evidence from the supplied candidate profile and job understanding.
+3. Use the job understanding as the primary representation of the role, responsibilities, and candidate requirements.
+4. Evaluate role alignment from the overall direction of the role and the candidate's stated target direction, not from isolated transferable skills.
+5. Evaluate each candidate requirement against relevant candidate evidence and keep positive and missing judgments mutually consistent.
+6. Treat absence of evidence as missing support, not as proof that the candidate lacks the capability.
+7. Use `risk_flags` only for material ambiguity or uncertainty in the semantic comparison.
+8. Keep `match_reasons` concise, evidence-based, and non-redundant.
+9. Preserve uncertainty where the available evidence is insufficient; do not infer or strengthen unsupported facts.
 
 ## Constraints
 

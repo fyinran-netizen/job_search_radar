@@ -41,17 +41,27 @@ class JobObservation(BaseModel):
     records_to_match: int
 
 
+class FollowupObservation(BaseModel):
+    navigation_pending_count: int
+    executable_followup_count: int
+    high_priority_executable_count: int
+    pre_extraction_count: int = 0
+    post_extraction_count: int = 0
+
+
 class ControllerObservation(BaseModel):
     common: CommonObservation
     search: SearchObservation | None = None
     pages: PageObservation | None = None
     jobs: JobObservation | None = None
+    followups: FollowupObservation | None = None
 
 
 __all__ = [
     "CommonObservation",
     "ControllerObservation",
     "JobObservation",
+    "FollowupObservation",
     "PageObservation",
     "SearchObservation",
 ]

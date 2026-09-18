@@ -25,7 +25,7 @@ class AgentRuntime:
 
 
 def create_real_agent_runtime() -> AgentRuntime:
-    """Create the configured Ollama providers and the seven-tool executor."""
+    """Create the configured Ollama providers and the bounded tool executor."""
 
     settings = load_runtime_settings()
     metadata: dict[str, Any] = {

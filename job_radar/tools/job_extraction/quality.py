@@ -3,12 +3,10 @@
 from collections import Counter
 from urllib.parse import urlparse
 
-from job_radar.tools.page_analysis.models import AIPageInput
+from job_radar.tools.page_analysis.models import AIPageInput, PendingKind, SuggestedNextAction
 from job_radar.tools.job_extraction.models import RawJobRecord
 
-from job_radar.tools.page_analysis.models import (
-    PendingFollowup,
-)
+from job_radar.tools.page_analysis.models import PendingFollowup
 
 
 class ExtractionReliabilityError(
@@ -52,9 +50,7 @@ def triage_extracted_page(
     if not records:
         return _pending(
             page,
-            pending_kind=(
-                "no_jobs_extracted"
-            ),
+            pending_kind="review_required",
             reasons=[
                 "JD-classified page produced "
                 "no job records after extraction"
@@ -153,9 +149,7 @@ def triage_extracted_page(
     ):
         return _pending(
             page,
-            pending_kind=(
-                "role_list_without_jd"
-            ),
+            pending_kind="navigation_required",
             reasons=[
                 "many role titles were "
                 "extracted from one page",
@@ -180,9 +174,7 @@ def triage_extracted_page(
     ):
         return _pending(
             page,
-            pending_kind=(
-                "role_list_without_jd"
-            ),
+            pending_kind="navigation_required",
             reasons=[
                 "multiple role titles were "
                 "extracted from one page",
@@ -207,9 +199,7 @@ def triage_extracted_page(
     ):
         return _pending(
             page,
-            pending_kind=(
-                "needs_detail_page"
-            ),
+            pending_kind="navigation_required",
             reasons=[
                 "many jobs share the same "
                 "apply URL and appear to need "
@@ -228,10 +218,10 @@ def triage_extracted_page(
 
 def _pending(
     page: AIPageInput,
-    pending_kind,
+    pending_kind: PendingKind,
     reasons: list[str],
-    evidence: dict,
-    suggested_next_action,
+    evidence: dict[str, object],
+    suggested_next_action: SuggestedNextAction,
     priority: int,
     role_titles: list[str] | None = None,
 ) -> PendingFollowup:

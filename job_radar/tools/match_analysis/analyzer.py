@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from typing import Any
 
 from job_radar.infra.llm.base import AIProvider
@@ -10,7 +11,7 @@ from job_radar.infra.llm.structured_output import validate_model
 from job_radar.tools.job_extraction.models import JobRecord
 from job_radar.tools.match_analysis.models import FinalMatchAssessment, ScoringRubric, SemanticMatchAssessment
 from job_radar.profile.models import UserProfile
-from job_radar.tools.job_understanding.models import JobRequirementFacts, JobUnderstandingRecord
+from job_radar.tools.job_understanding.models import JobRequirementFacts, JobUnderstandingRecord, RequirementFact
 from job_radar.tools.match_analysis.scoring import build_final_assessment
 
 
@@ -77,7 +78,7 @@ class SemanticMatchAnalyzer:
                 "skills": profile.skills,
             },
             "job": _job_payload(job),
-            "job_understanding": understanding.model_dump() if understanding else None,
+            "job_understanding": _understanding_payload(job, understanding),
             "instructions": [
                 "Assess role alignment and must-have requirement fit once.",
                 "Be conservative when the job description is vague.",
@@ -89,19 +90,55 @@ class SemanticMatchAnalyzer:
 
 def _job_payload(job: JobRecord) -> dict[str, Any]:
     return {
-        "company_name": job.company_name,
-        "company_type": job.company_type,
         "title": job.title,
-        "locations": job.locations,
         "description": job.description,
         "requirements": job.requirements,
         "recruitment_type": job.recruitment_type,
-        "graduation_years": job.graduation_years,
-        "graduation_start": job.graduation_start,
-        "graduation_end": job.graduation_end,
-        "graduation_requirement": job.graduation_requirement,
-        "deadline": job.deadline,
-        "education_levels": job.education_levels,
-        "source_name": job.source_name,
-        "is_official": job.is_official,
     }
+
+
+def _understanding_payload(
+    job: JobRecord,
+    understanding: JobRequirementFacts | None,
+) -> dict[str, Any] | None:
+    """Project job understanding without facts owned by Basic Gate."""
+
+    if understanding is None:
+        return None
+    payload = understanding.model_dump()
+    payload["requirements"] = [
+        fact.model_dump()
+        for fact in understanding.requirements
+        if not _is_basic_gate_covered(fact, job)
+    ]
+    return payload
+
+
+def _is_basic_gate_covered(fact: RequirementFact, job: JobRecord) -> bool:
+    """Filter only requirement meanings already represented by gate inputs."""
+
+    text = " ".join(part for part in (fact.text, fact.evidence) if part).casefold()
+    if (
+        job.graduation_years
+        or job.graduation_start
+        or job.graduation_end
+        or job.graduation_requirement
+    ) and _contains_any(text, ("graduat", "cohort", "class of", "completion year")):
+        return True
+    if job.education_levels and _contains_any(
+        text,
+        ("degree", "bachelor", "master", "phd", "doctorate", "diploma", "education level"),
+    ):
+        return True
+    if job.deadline and _contains_any(text, ("deadline", "apply by", "application close", "applications close")):
+        return True
+    if job.locations and _contains_any(
+        text,
+        ("location", "remote", "hybrid", "on-site", "onsite", "relocate", "work from"),
+    ):
+        return True
+    return False
+
+
+def _contains_any(text: str, phrases: tuple[str, ...]) -> bool:
+    return any(re.search(rf"\b{re.escape(phrase)}", text) for phrase in phrases)

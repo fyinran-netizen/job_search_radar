@@ -46,6 +46,7 @@ class AgentLimits(BaseModel):
             "build_search_plan": 3,
             "analyze_page": 3,
             "job_extraction": 3,
+            "explore_followups": 3,
             "job_understanding": 3,
             "match_analysis": 3,
         }
@@ -100,6 +101,8 @@ class AgentState(BaseModel):
     analyzed_page_urls: list[str] = Field(default_factory=list)
     extracted_page_urls: list[str] = Field(default_factory=list)
     pending_followups: list[PendingFollowup] = Field(default_factory=list)
+    explored_followup_links: list[str] = Field(default_factory=list)
+    followup_resolutions: list[dict[str, Any]] = Field(default_factory=list)
     rejected_pages: list[RejectedPage] = Field(default_factory=list)
     page_analysis_traces: list[PageAnalysisTrace] = Field(default_factory=list)   # 暂时保留：后续迁移到 tracing / observability，不作为长期核心 runtime state。
 

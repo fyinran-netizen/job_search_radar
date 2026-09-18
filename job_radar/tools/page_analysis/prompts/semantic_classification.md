@@ -13,7 +13,7 @@ Never fetch, follow, open, or infer the contents of a link. A link is evidence
 of the current page's structure only. Do not assume that a detail page exists,
 or that it contains a particular role, until it has been acquired.
 
-Return one JSON object with exactly the existing fields:
+Return one JSON object with exactly these classification fields:
 
 - `page_type`
 - `suggested_next_action`
@@ -63,4 +63,7 @@ are visible.
 
 The `suggested_next_action` must match the page type exactly as specified above;
 do not invent or freely choose another action. Keep reasons and evidence limited
-to what is visible on this page. Return only JSON.
+to what is visible on this page. `page_type` is the semantic classification of
+the current page; it is not the Agent's coarse pending category. The application
+maps non-`job_detail` page types to `PendingFollowup.pending_kind` separately.
+Return only JSON.

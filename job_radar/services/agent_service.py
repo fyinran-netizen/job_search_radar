@@ -200,7 +200,7 @@ def _state_counts(state: AgentState) -> dict[str, int]:
         field_name: len(getattr(state, field_name))
         for field_name in (
             "query_history", "executed_queries", "candidate_sources", "selected_sources",
-            "acquired_pages", "job_detail_pages", "pending_followups", "rejected_pages",
+            "acquired_pages", "job_detail_pages", "pending_followups", "explored_followup_links", "followup_resolutions", "rejected_pages",
             "page_analysis_traces", "prepared_jobs", "understanding_records", "match_assessments",
             "errors",
         )

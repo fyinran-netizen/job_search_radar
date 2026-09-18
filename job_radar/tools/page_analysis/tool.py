@@ -105,4 +105,4 @@ def _analysis_pending(page: AIPageInput | PageDocument, reason: str) -> PendingF
     metadata = page.metadata if isinstance(page, PageDocument) else {}
     company_name = metadata.get("company_name", getattr(page, "source_company_name", None))
     company_type = metadata.get("company_type", getattr(page, "company_type", None))
-    return PendingFollowup(url=page.url, final_url=metadata.get("final_url"), title=page.title, source_name=page.source_name, company_name=company_name, company_type=company_type, is_official=bool(metadata.get("is_official", getattr(page, "is_official", False))), pending_kind="semantic_classification_failed", reasons=[reason], evidence={}, suggested_next_action="manual_review", priority=50, stage="pre_extraction")
+    return PendingFollowup(url=page.url, final_url=metadata.get("final_url"), title=page.title, source_name=page.source_name, company_name=company_name, company_type=company_type, is_official=bool(metadata.get("is_official", getattr(page, "is_official", False))), pending_kind="review_required", reasons=[reason], evidence={}, suggested_next_action="manual_review", priority=50, stage="pre_extraction")
