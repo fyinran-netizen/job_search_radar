@@ -97,11 +97,13 @@ def has_executable_href(
     *,
     excluded_urls: set[str] | list[str] | None = None,
     explored_links: set[str] | list[str] | None = None,
+    processed_followup_urls: set[str] | list[str] | None = None,
 ) -> bool:
     """Return whether at least one navigation href can produce a new source."""
 
+    processed = normalized_url_set(processed_followup_urls or set())
     sources, _, _ = select_href_targets(
-        pending_followups,
+        (item for item in pending_followups if normalized_http_url(item.url) not in processed),
         excluded_urls=excluded_urls,
         explored_links=explored_links,
     )

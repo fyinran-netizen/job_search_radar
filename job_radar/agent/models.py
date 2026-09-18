@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from job_radar.agent.action_names import AgentActionName
 from job_radar.profile.models import ProfileCompletenessResult
@@ -40,6 +40,12 @@ class AgentLimits(BaseModel):
         description="Maximum accumulated job results retained for a run.",
     )
     max_steps: int = Field(default=25, ge=1)
+    acquire_batch_size: int = Field(default=3, ge=1)
+    analyze_batch_size: int = Field(default=3, ge=1)
+    extraction_batch_size: int = Field(default=3, ge=1)
+    understanding_batch_size: int = Field(default=3, ge=1)
+    match_batch_size: int = Field(default=3, ge=1)
+    followup_batch_size: int = Field(default=3, ge=1)
     max_queries_per_round: int = Field(default=6, ge=1)
     action_call_limits: dict[AgentActionName, int] = Field(
         default_factory=lambda: {
@@ -91,6 +97,9 @@ class AgentState(BaseModel):
     search_round_results: list[list[CandidateSource]] = Field(default_factory=list)   # 暂时保留：后续考虑替换为更轻量的 search_round_summaries。
     last_search_outcome: SearchOutcome | None = None
     candidate_sources: list[CandidateSource] = Field(default_factory=list)
+    acquisition_queue: list[CandidateSource] = Field(default_factory=list)
+    # Deprecated compatibility/debugging history. Acquisition execution uses
+    # acquisition_queue exclusively.
     selected_sources: list[CandidateSource] = Field(default_factory=list)
 
     acquired_pages: list[PageDocument] = Field(default_factory=list)
@@ -102,6 +111,7 @@ class AgentState(BaseModel):
     extracted_page_urls: list[str] = Field(default_factory=list)
     pending_followups: list[PendingFollowup] = Field(default_factory=list)
     explored_followup_links: list[str] = Field(default_factory=list)
+    processed_followup_urls: list[str] = Field(default_factory=list)
     followup_resolutions: list[dict[str, Any]] = Field(default_factory=list)
     rejected_pages: list[RejectedPage] = Field(default_factory=list)
     page_analysis_traces: list[PageAnalysisTrace] = Field(default_factory=list)   # 暂时保留：后续迁移到 tracing / observability，不作为长期核心 runtime state。
@@ -114,6 +124,19 @@ class AgentState(BaseModel):
     match_assessments: list[dict[str, Any]] = Field(default_factory=list)
     matched_job_keys: list[str] = Field(default_factory=list)
     errors: list[AgentError] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def migrate_selected_sources_to_queue(self) -> "AgentState":
+        """Keep old checkpoints usable while the queue becomes authoritative."""
+
+        if not self.acquisition_queue and self.selected_sources:
+            handled = {page.url for page in self.acquired_pages}
+            handled.update(item.url for item in self.rejected_pages)
+            handled.update(error.url for error in self.errors if error.url)
+            self.acquisition_queue = [
+                source for source in self.selected_sources if source.url not in handled
+            ]
+        return self
 
 
 class AgentRunResult(BaseModel):

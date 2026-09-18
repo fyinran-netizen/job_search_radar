@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from job_radar.agent.models import AgentError, AgentLimits, AgentState, SearchOutcome
 from job_radar.agent.action_names import AgentActionName
-from job_radar.agent.policies.availability import action_availability, _executable_sources, _followup_excluded_urls
+from job_radar.agent.policies.availability import action_availability, _followup_excluded_urls
 from job_radar.agent.transitions import stop_with_reason
 from job_radar.profile.models import UserProfile
 from job_radar.tools.executor import ToolExecutor
@@ -25,6 +25,8 @@ from job_radar.tools.page_analysis.tool import PageAnalysisInput, PageAnalysisOu
 from job_radar.tools.web_search.models import CandidateSource
 from job_radar.tools.search_plan import SearchPlanToolInput, SearchPlan
 from job_radar.tools.web_search.source_selection import normalize_url, select_sources
+from job_radar.agent.work_queue import enqueue_sources, take_source_batch
+from job_radar.tools.explore_followups.common import normalized_http_url
 from job_radar.infra.logging import get_logger
 
 logger = get_logger(__name__)
@@ -81,16 +83,16 @@ def execute_action(
     if action.action == "web_search":
         return _run_web_search(state, executor, limits)
     if action.action == "acquire_page":
-        return _run_acquire_page(state, executor)
+        return _run_acquire_page(state, executor, limits)
     if action.action == "analyze_page":
-        return _run_analyze_page(state, executor)
+        return _run_analyze_page(state, executor, limits)
     if action.action == "job_extraction":
-        return _run_job_extraction(state, executor, profile)
+        return _run_job_extraction(state, executor, profile, limits)
     if action.action == "explore_followups":
-        return _run_explore_followups(state, executor)
+        return _run_explore_followups(state, executor, limits)
     if action.action == "job_understanding":
-        return _run_job_understanding(state, executor)
-    return _run_match_analysis(state, executor, profile)
+        return _run_job_understanding(state, executor, limits)
+    return _run_match_analysis(state, executor, profile, limits)
 
 
 def _increment_action_call_count(
@@ -124,23 +126,28 @@ def _run_web_search(state: AgentState, executor: ToolExecutor, limits: AgentLimi
     if not isinstance(result, list):
         raise TypeError("web_search must return a list")
     sources = [item if isinstance(item, CandidateSource) else CandidateSource.model_validate(item) for item in result]
-    previous_urls = {normalize_url(source.url) for source in state.candidate_sources}
-    selected = select_sources(sources, previous_urls=previous_urls, max_sources=limits.max_sources_per_round)
+    selected = select_sources(sources, max_sources=limits.max_sources_per_round)
     all_candidates = _merge_by_key(state.candidate_sources, sources, lambda item: normalize_url(item.url))
+    queue, admission = enqueue_sources(
+        state.acquisition_queue,
+        selected,
+        handled_urls=_handled_source_urls(state),
+        known_urls=[source.url for source in state.candidate_sources],
+    )
     logger.info(
         "search_round round_index=%s queries=%s executed_queries=%s new_urls=%s selected_sources=%s accepted_pages=%s stop_reason=%s",
         state.round_index, state.search_plan.queries, queries,
-        len({normalize_url(item.url) for item in sources if normalize_url(item.url) not in previous_urls}),
-        len(selected), 0, None,
+        admission.enqueued_count, admission.queue_size_after_enqueue, 0, None,
     )
     return state.model_copy(update={
         "round_index": state.round_index + 1,
         "candidate_sources": all_candidates,
-        "selected_sources": selected,
+        "acquisition_queue": queue,
+        "selected_sources": _merge_by_key(state.selected_sources, admission.enqueued_sources, lambda item: normalize_url(item.url)),
         "search_round_results": [*state.search_round_results, sources],
         "executed_queries": _merge_strings(state.executed_queries, queries),
         "query_history": _merge_strings(state.query_history, queries),
-        "last_search_outcome": SearchOutcome.PROGRESS if selected else SearchOutcome.NO_PROGRESS,
+        "last_search_outcome": SearchOutcome.PROGRESS if admission.enqueued_count else SearchOutcome.NO_PROGRESS,
     })
 
 
@@ -158,10 +165,11 @@ def _run_build_search_plan(state: AgentState, executor: ToolExecutor, limits: Ag
     return state.model_copy(update={"search_plan": plan, "executed_queries": []})
 
 
-def _run_acquire_page(state: AgentState, executor: ToolExecutor) -> AgentState:
+def _run_acquire_page(state: AgentState, executor: ToolExecutor, limits: AgentLimits) -> AgentState:
     pages = list(state.acquired_pages)
     errors = list(state.errors)
-    for source in _executable_sources(state):
+    batch, remaining = take_source_batch(state.acquisition_queue, limits.acquire_batch_size)
+    for source in batch:
         try:
             page = executor.run("acquire_page", source)
             from job_radar.tools.page_acquisition.models import PageDocument
@@ -171,14 +179,14 @@ def _run_acquire_page(state: AgentState, executor: ToolExecutor) -> AgentState:
         except Exception as exc:
             errors.append(AgentError(stage="acquire_page", url=source.url, title=source.title, reason=str(exc)))
     logger.info(
-        "page_acquisition selected_source_count=%s accepted_page_count=%s",
-        len(_executable_sources(state)), len(pages) - len(state.acquired_pages),
+        "page_acquisition source_count=%s accepted_page_count=%s",
+        len(batch), len(pages) - len(state.acquired_pages),
     )
-    return state.model_copy(update={"acquired_pages": pages, "errors": errors})
+    return state.model_copy(update={"acquisition_queue": remaining, "acquired_pages": pages, "errors": errors})
 
 
-def _run_analyze_page(state: AgentState, executor: ToolExecutor) -> AgentState:
-    pages = _unprocessed_acquired_pages(state)
+def _run_analyze_page(state: AgentState, executor: ToolExecutor, limits: AgentLimits) -> AgentState:
+    pages = _unprocessed_acquired_pages(state)[:limits.analyze_batch_size]
     result = executor.run("analyze_page", PageAnalysisInput(pages=pages))
     if not isinstance(result, PageAnalysisOutput):
         result = PageAnalysisOutput.model_validate(result)
@@ -192,8 +200,8 @@ def _run_analyze_page(state: AgentState, executor: ToolExecutor) -> AgentState:
     })
 
 
-def _run_job_extraction(state: AgentState, executor: ToolExecutor, profile: UserProfile | None) -> AgentState:
-    pages = _unextracted_pages(state)
+def _run_job_extraction(state: AgentState, executor: ToolExecutor, profile: UserProfile | None, limits: AgentLimits) -> AgentState:
+    pages = _unextracted_pages(state)[:limits.extraction_batch_size]
     assert profile is not None
     result = executor.run("job_extraction", JobExtractionInput(pages=pages, profile=profile))
     if not isinstance(result, JobExtractionOutput):
@@ -206,23 +214,31 @@ def _run_job_extraction(state: AgentState, executor: ToolExecutor, profile: User
     })
 
 
-def _run_explore_followups(state: AgentState, executor: ToolExecutor) -> AgentState:
+def _run_explore_followups(state: AgentState, executor: ToolExecutor, limits: AgentLimits) -> AgentState:
+    pending = _select_followup_batch(state, limits.followup_batch_size)
     result = executor.run(
         "explore_followups",
         ExploreFollowupsInput(
-            pending_followups=state.pending_followups,
+            pending_followups=pending,
             excluded_urls=_followup_excluded_urls(state),
             explored_links=set(state.explored_followup_links),
         ),
     )
     if not isinstance(result, ExploreFollowupsOutput):
         result = ExploreFollowupsOutput.model_validate(result)
+    queue, _ = enqueue_sources(
+        state.acquisition_queue,
+        result.sources,
+        handled_urls=_handled_source_urls(state),
+        known_urls=[source.url for source in state.candidate_sources],
+    )
     return state.model_copy(update={
         "candidate_sources": _merge_by_key(
             state.candidate_sources,
             result.sources,
             lambda source: normalize_url(source.url),
         ),
+        "acquisition_queue": queue,
         "selected_sources": _merge_by_key(
             state.selected_sources,
             result.sources,
@@ -236,11 +252,15 @@ def _run_explore_followups(state: AgentState, executor: ToolExecutor) -> AgentSt
             *state.followup_resolutions,
             *[item.model_dump(mode="json") for item in result.resolutions],
         ],
+        "processed_followup_urls": _merge_strings(
+            state.processed_followup_urls,
+            [normalize_url(item.url) for item in pending],
+        ),
     })
 
 
-def _run_job_understanding(state: AgentState, executor: ToolExecutor) -> AgentState:
-    jobs = _ununderstood_jobs(state)
+def _run_job_understanding(state: AgentState, executor: ToolExecutor, limits: AgentLimits) -> AgentState:
+    jobs = _ununderstood_jobs(state)[:limits.understanding_batch_size]
     result = executor.run("job_understanding", JobUnderstandingToolInput(jobs=jobs))
     if not isinstance(result, JobUnderstandingToolOutput):
         result = JobUnderstandingToolOutput.model_validate(result)
@@ -251,9 +271,9 @@ def _run_job_understanding(state: AgentState, executor: ToolExecutor) -> AgentSt
     })
 
 
-def _run_match_analysis(state: AgentState, executor: ToolExecutor, profile: UserProfile | None) -> AgentState:
+def _run_match_analysis(state: AgentState, executor: ToolExecutor, profile: UserProfile | None, limits: AgentLimits) -> AgentState:
     assert profile is not None
-    records = _unmatched_records(state)
+    records = _unmatched_records(state)[:limits.match_batch_size]
     result = executor.run("match_analysis", MatchAnalysisToolInput(records=records, prepared_jobs=state.prepared_jobs, profile=profile))
     if not isinstance(result, MatchAnalysisToolOutput):
         result = MatchAnalysisToolOutput.model_validate(result)
@@ -282,6 +302,27 @@ def _ununderstood_jobs(state: AgentState) -> list[Any]:
 def _unmatched_records(state: AgentState) -> list[Any]:
     completed = set(state.matched_job_keys)
     return [record for record in state.understanding_records if record.deduplication_key not in completed]
+
+
+def _handled_source_urls(state: AgentState) -> set[str]:
+    urls = {normalize_url(page.url) for page in state.acquired_pages}
+    urls.update(normalize_url(item.url) for item in state.rejected_pages)
+    urls.update(normalize_url(error.url) for error in state.errors if error.url)
+    return urls
+
+
+def _select_followup_batch(state: AgentState, batch_size: int) -> list[Any]:
+    selected: list[Any] = []
+    processed = {normalize_url(url) for url in state.processed_followup_urls}
+    for item in state.pending_followups:
+        if len(selected) >= batch_size or item.pending_kind != "navigation_required":
+            continue
+        if normalize_url(item.url) in processed:
+            continue
+        if not any(normalized_http_url(link.get("href") or link.get("url")) for link in item.links):
+            continue
+        selected.append(item)
+    return selected
 
 
 def _merge_strings(existing: list[str], additions: list[str]) -> list[str]:

@@ -49,9 +49,9 @@ def _build_search_observation(context: DecisionContext) -> SearchObservation:
     state = context.state
     return SearchObservation(
         candidate_source_count=len(state.candidate_sources),
-        selected_source_count=len(state.selected_sources),
+        selected_source_count=len(state.acquisition_queue),
         remaining_query_count=_remaining_queries(state),
-        remaining_source_count=len(state.selected_sources) - _handled_source_count(state),
+        remaining_source_count=len(state.acquisition_queue),
         last_search_outcome=state.last_search_outcome.value if state.last_search_outcome else None,
     )
 
@@ -100,7 +100,7 @@ def _build_followup_observation(state: AgentState) -> FollowupObservation:
 def _followup_observation_excluded_urls(state: AgentState) -> set[str]:
     urls = {normalize_url(page.url) for page in state.acquired_pages}
     urls.update(normalize_url(page.url) for page in state.job_detail_pages)
-    urls.update(normalize_url(source.url) for source in state.selected_sources)
+    urls.update(normalize_url(source.url) for source in state.acquisition_queue)
     urls.update(normalize_url(source.url) for source in state.candidate_sources)
     urls.update(normalize_url(item.url) for item in state.rejected_pages)
     urls.update(normalize_url(error.url) for error in state.errors if error.url)
@@ -118,7 +118,7 @@ def _handled_source_count(state: AgentState) -> int:
     handled.update(normalize_url(item.url) for item in state.pending_followups)
     handled.update(normalize_url(item.url) for item in state.rejected_pages)
     handled.update(normalize_url(error.url) for error in state.errors if error.url)
-    return sum(normalize_url(source.url) in handled for source in state.selected_sources)
+    return sum(normalize_url(source.url) in handled for source in state.acquisition_queue)
 
 
 __all__ = ["build_observation"]

@@ -6,8 +6,6 @@ required to execute.  It deliberately does not encode workflow transitions.
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, Field
 
 from job_radar.agent.action_names import AGENT_ACTION_NAMES, AgentActionName
@@ -62,10 +60,8 @@ def action_availability(
         if state.last_search_outcome is SearchOutcome.STOPPED_NO_PROGRESS:
             reasons.append("no-progress stop condition reached")
     elif action == "acquire_page":
-        if not state.selected_sources:
-            reasons.append("selected_sources is empty")
-        if not _executable_sources(state):
-            reasons.append("no unprocessed executable selected_sources")
+        if not state.acquisition_queue:
+            reasons.append("acquisition_queue is empty")
     elif action == "analyze_page":
         if not state.acquired_pages:
             reasons.append("acquired_pages is empty")
@@ -85,6 +81,7 @@ def action_availability(
             state.pending_followups,
             excluded_urls=_followup_excluded_urls(state),
             explored_links=state.explored_followup_links,
+            processed_followup_urls=state.processed_followup_urls,
         ):
             reasons.append("no unresolved navigation followup has a new executable href")
     elif action == "job_understanding":
@@ -122,11 +119,6 @@ def available_actions(
     ]
 
 
-def _executable_sources(state: AgentState) -> list[Any]:
-    handled = _state_urls(state)
-    return [source for source in state.selected_sources if normalize_url(source.url) not in handled]
-
-
 def _state_urls(state: AgentState) -> set[str]:
     urls = {normalize_url(page.url) for page in state.acquired_pages}
     urls.update(normalize_url(item.url) for item in state.pending_followups)
@@ -139,7 +131,7 @@ def _followup_excluded_urls(state: AgentState) -> set[str]:
     """URLs that follow-up exploration must never enqueue again."""
 
     urls = _state_urls(state)
-    urls.update(normalize_url(source.url) for source in state.selected_sources)
+    urls.update(normalize_url(source.url) for source in state.acquisition_queue)
     urls.update(normalize_url(source.url) for source in state.candidate_sources)
     return urls
 
@@ -173,6 +165,6 @@ def _has_stop_evidence(state: AgentState, limits: AgentLimits) -> bool:
         state.round_index >= limits.max_rounds
         or len(state.prepared_jobs) >= limits.max_results
         or state.last_search_outcome in (SearchOutcome.ERROR, SearchOutcome.STOPPED_NO_PROGRESS)
-        or (not state.search_plan and not state.candidate_sources and not state.selected_sources)
+        or (not state.search_plan and not state.candidate_sources and not state.acquisition_queue)
         or (not state.acquired_pages and not state.job_detail_pages and not state.prepared_jobs and bool(state.errors))
     )
