@@ -85,7 +85,7 @@ AI returns MatchAssessment
 | Job extraction | Prefer LLM extraction for varied pages, then validate. | `RuleBasedJobExtractor`; `LLMJobExtractor` boundary exists for later. |
 | Validation/normalization/dedup | Deterministic quality gate. | Implemented in `pipeline/`. |
 | Job understanding | AI identifies hard requirements, eligibility, risks. | Not implemented. |
-| Match analysis | AI/Rules calculate fit, gaps, recommendation, explanation. | Rule-based matcher only. |
+| Match analysis | LLM compares role/requirements semantically; program scoring combines that evidence with the stored Basic Gate, normalized location, and source facts. | Semantic analyzer plus deterministic scorer. |
 | Continue decision | AI decides whether to search another round within limits. | Not implemented. |
 | Persistence/UI/feedback | Save jobs, scores, run logs, user feedback. | SQLite jobs, status/notes, Streamlit table/export. |
 

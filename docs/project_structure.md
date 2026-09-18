@@ -18,7 +18,6 @@ job_search_radar/
 |-- config/
 |   |-- profile.example.yaml
 |   |-- sources.example.yaml
-|   `-- matching_rules.example.yaml
 |-- data/
 |   `-- .gitkeep
 |-- docs/

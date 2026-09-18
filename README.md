@@ -115,7 +115,6 @@ Private configuration is read from these files when present, otherwise the corre
 
 - `config/profile.yaml`
 - `config/sources.yaml`
-- `config/matching_rules.yaml`
 - root `.env` for provider settings
 
 Copy and edit the example files locally as needed. They are intentionally excluded from Git when they contain personal data or credentials.

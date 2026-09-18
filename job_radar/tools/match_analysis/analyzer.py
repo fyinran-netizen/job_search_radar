@@ -8,22 +8,17 @@ from job_radar.infra.llm.base import AIProvider
 from job_radar.infra.llm.prompt_loader import load_runtime_prompt
 from job_radar.infra.llm.structured_output import validate_model
 from job_radar.tools.job_extraction.models import JobRecord
-from job_radar.tools.job_extraction.models import BasicGateResult
 from job_radar.tools.match_analysis.models import FinalMatchAssessment, ScoringRubric, SemanticMatchAssessment
 from job_radar.profile.models import UserProfile
 from job_radar.tools.job_understanding.models import JobRequirementFacts, JobUnderstandingRecord
-from job_radar.tools.match_analysis.deterministic import (
-    build_deterministic_final,
-    evaluate_deterministic_match,
-    merge_match_results,
-)
+from job_radar.tools.match_analysis.scoring import build_final_assessment
 
 
 logger = logging.getLogger(__name__)
 
 
 class SemanticMatchAnalyzer:
-    """Run one semantic AI matching call per job and apply deterministic overrides."""
+    """Run the one semantic comparison call; scoring is deterministic."""
 
     def __init__(
         self,
@@ -38,27 +33,14 @@ class SemanticMatchAnalyzer:
         self.timeout_seconds = timeout_seconds
 
     def analyze(self, job: JobRecord, profile: UserProfile) -> FinalMatchAssessment:
-        """Analyze one job against a profile."""
-
-        # Legacy single-job API: the agent pipeline uses analyze_understanding
-        # with the gate result attached during extraction.
-        basic_gate = evaluate_deterministic_match(job, profile)
-        logger.info("match_analysis gate title=%s graduation=%s deadline=%s decision=%s hard_reject=%s reasons=%s", job.title, profile.graduation_date, job.deadline, basic_gate.decision, basic_gate.hard_reject, "; ".join(basic_gate.gate_reasons))
-        if not basic_gate.should_continue:
-            final = build_deterministic_final(job, basic_gate)
-            logger.info("match_analysis final title=%s score=%s decision=%s", job.title, final.match_score, final.recommendation)
-            return final
-
-        system_prompt, user_prompt = self._build_prompts(job, profile, basic_gate, None)
-        data = self.provider.generate_json(
-            user_prompt,
-            timeout_seconds=self.timeout_seconds,
-            system_prompt=system_prompt,
+        """Legacy entry point that uses the gate already stored on ``job``."""
+        record = JobUnderstandingRecord(
+            deduplication_key=job.deduplication_key,
+            basic_gate=job.basic_gate,
+            understanding=None,
+            source="ai",
         )
-        semantic = validate_model(data, SemanticMatchAssessment)
-        final = merge_match_results(semantic, basic_gate)
-        logger.info("match_analysis final title=%s score=%s decision=%s", job.title, final.match_score, final.recommendation)
-        return final
+        return self.analyze_understanding(record, job, profile)
 
     def analyze_understanding(self, record: JobUnderstandingRecord, job: JobRecord, profile: UserProfile) -> FinalMatchAssessment:
         """Analyze one understood job against a profile."""
@@ -66,18 +48,18 @@ class SemanticMatchAnalyzer:
         basic_gate = record.basic_gate
         logger.info("match_analysis gate title=%s graduation=%s deadline=%s decision=%s hard_reject=%s reasons=%s", job.title, profile.graduation_date, job.deadline, basic_gate.decision, basic_gate.hard_reject, "; ".join(basic_gate.gate_reasons))
         if not basic_gate.should_continue:
-            final = build_deterministic_final(job, basic_gate)
+            final = build_final_assessment(job, record.understanding, None, profile, basic_gate, self.rubric)
             logger.info("match_analysis final title=%s score=%s decision=%s", job.title, final.match_score, final.recommendation)
             return final
 
-        system_prompt, user_prompt = self._build_prompts(job, profile, basic_gate, record.understanding)
+        system_prompt, user_prompt = self._build_prompts(job, profile, record.understanding)
         data = self.provider.generate_json(
             user_prompt,
             timeout_seconds=self.timeout_seconds,
             system_prompt=system_prompt,
         )
         semantic = validate_model(data, SemanticMatchAssessment)
-        final = merge_match_results(semantic, basic_gate)
+        final = build_final_assessment(job, record.understanding, semantic, profile, basic_gate, self.rubric)
         logger.info("match_analysis final title=%s score=%s decision=%s", job.title, final.match_score, final.recommendation)
         return final
 
@@ -85,7 +67,6 @@ class SemanticMatchAnalyzer:
         self,
         job: JobRecord,
         profile: UserProfile,
-        basic_gate: BasicGateResult,
         understanding: JobRequirementFacts | None,
     ) -> tuple[str, str]:
         skill = load_runtime_prompt(self.skill_name)
@@ -94,29 +75,22 @@ class SemanticMatchAnalyzer:
             [
                 "You are Job Radar's semantic match analysis component.",
                 skill.instructions.strip(),
-                "Program-owned deterministic checks take priority over your semantic judgment.",
-                "Use the fixed scoring rubric exactly; do not invent new scoring categories.",
+                "Return semantic role alignment and requirement fit only. Program code owns eligibility, scoring, and recommendation.",
                 "Return ONLY valid JSON matching the schema. Do not include Markdown or explanations.",
                 f"Output schema:\n{schema}",
             ]
         )
         user_payload: dict[str, Any] = {
-            "candidate_profile": profile.model_dump(),
-            "prepared_job": _job_payload(job),
-            "job_understanding": understanding.model_dump() if understanding else None,
-            "program_basic_gate": basic_gate.model_dump(),
-            "scoring_rubric": self.rubric.model_dump(),
-            "recommendation_scale": {
-                "apply": "Strong semantic fit and enough evidence.",
-                "consider": "Plausible fit, but not clearly top priority.",
-                "low_priority": "Weak fit or important uncertainty.",
-                "skip": "Poor semantic fit or clear disqualifying concern.",
+            "candidate_profile": {
+                "education": profile.education,
+                "target_roles": profile.target_roles,
+                "skills": profile.skills,
             },
+            "job": _job_payload(job),
+            "job_understanding": understanding.model_dump() if understanding else None,
             "instructions": [
-                "Assess semantic fit once; do not ask for more context.",
-                "Keep match_score between 0 and 100.",
+                "Assess role alignment and must-have requirement fit once.",
                 "Be conservative when the job description is vague.",
-                "Do not override deterministic hard facts, risk flags, or score caps.",
                 "Put uncertainty in missing_requirements or risk_flags rather than guessing.",
             ],
         }

@@ -106,6 +106,8 @@ class AgentState(BaseModel):
     prepared_jobs: list[JobRecord] = Field(default_factory=list)
     understanding_records: list[JobUnderstandingRecord] = Field(default_factory=list)
     understood_job_keys: list[str] = Field(default_factory=list)
+    # Each item is the MatchAnalysisTool envelope: metadata at the top level
+    # and the FinalMatchAssessment under ``assessment``.
     match_assessments: list[dict[str, Any]] = Field(default_factory=list)
     matched_job_keys: list[str] = Field(default_factory=list)
     errors: list[AgentError] = Field(default_factory=list)

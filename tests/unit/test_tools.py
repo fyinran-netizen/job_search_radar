@@ -19,7 +19,7 @@ from job_radar.tools.match_analysis.analyzer import SemanticMatchAnalyzer
 from job_radar.tools.search_plan import SearchPlanBuilder, SearchPlanLimits
 from job_radar.tools.search_plan import BuildSearchPlanTool, SearchPlanToolInput
 from job_radar.tools.web_search.source_selection import normalize_url, select_sources
-from job_radar.config import load_matching_rules, load_profile
+from job_radar.config import load_profile
 from job_radar.tools.job_extraction.models import BasicGateResult, RawJobRecord
 from job_radar.tools.web_search.models import CandidateSource, SearchPlan
 from job_radar.tools.web_search.providers.tavily import TavilyWebSearchTool
@@ -30,7 +30,6 @@ from job_radar.tools.page_analysis.cleaning import clean_page_text
 from job_radar.tools.page_analysis.triage import triage_pages
 from job_radar.tools.job_extraction.quality import triage_extracted_page
 from job_radar.tools.job_extraction.backend_gate.gate import evaluate_basic_gate
-from job_radar.tools.match_analysis.deterministic import evaluate_deterministic_match
 from job_radar.tools.job_extraction.normalization import normalize_records
 from job_radar.profile.completeness import ProfileCompletenessChecker
 from job_radar.infra.paths import CONFIG_DIR
@@ -330,7 +329,8 @@ def test_deterministic_match_bypasses_ai_for_graduation_year_mismatch() -> None:
         skills=["Python"],
     )
 
-    result = evaluate_deterministic_match(job, profile)
+    result = evaluate_basic_gate(job, profile)
+    job = job.model_copy(update={"basic_gate": result})
     analyzer = SemanticMatchAnalyzer(MockAIProvider({"should_not": "be called"}))
     assessment = analyzer.analyze(job, profile)
 
@@ -350,7 +350,7 @@ def test_deterministic_match_treats_september_as_next_cohort() -> None:
         skills=["Python"],
     )
 
-    result = evaluate_deterministic_match(job, profile)
+    result = evaluate_basic_gate(job, profile)
 
     assert result.should_call_ai
     assert not result.hard_reject
@@ -510,29 +510,34 @@ def test_semantic_match_analyzer_merges_deterministic_risks() -> None:
     )
     provider = MockAIProvider(
         {
-            "match_score": 96,
             "role_fit": "high",
             "must_have_fit": "yes",
             "match_reasons": ["Role involves backend systems relevant to the candidate."],
             "missing_requirements": ["Cloud stack is not specified."],
             "risk_flags": ["vague_tech_stack"],
-            "job_summary": "Information technology graduate role building internal banking systems.",
-            "recommendation": "apply",
             "confidence": "high",
         }
     )
 
+    gate = evaluate_basic_gate(job, profile)
+    job = job.model_copy(update={"basic_gate": gate})
     assessment = SemanticMatchAnalyzer(provider).analyze(job, profile)
 
     assert assessment.analysis_source == "ai_with_deterministic_overrides"
-    assert assessment.match_score == 96
+    assert assessment.match_score == 87
     assert assessment.recommendation == "apply"
     assert assessment.confidence == "medium"
-    assert assessment.risk_flags == ["deadline_unknown", "education_requirement_unknown", "location_unknown", "vague_tech_stack"]
+    assert assessment.risk_flags == ["deadline_unknown", "education_requirement_unknown", "location_unknown", "vague_tech_stack", "non_official_source"]
+    assert assessment.score_components == {
+        "role_alignment": 100,
+        "requirement_fit": 100,
+        "eligibility": 70,
+        "location_preference": 50,
+    }
     assert provider.prompts
     assert "You are Job Radar's semantic match analysis component." in provider.prompts[0]
     assert '"candidate_profile"' in provider.prompts[1]
-    assert "fixed scoring rubric" in provider.prompts[0].lower()
+    assert "match_score" not in provider.prompts[0]
 
 
 def test_parse_json_output_repairs_only_trailing_container_closures() -> None:

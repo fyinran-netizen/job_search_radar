@@ -286,7 +286,7 @@ This is why the current project should avoid growing page-specific parsing rules
 | Validation | `validate_records` | `RawJobRecord` list | Valid records and errors | Reject records missing required fields. |
 | Normalization | `normalize_records` | Valid raw records | `JobRecord` list | Canonicalize locations and build URL-first deduplication keys while preserving source company/title. |
 | Deduplication | `deduplicate_records` | `JobRecord` list | Unique jobs and duplicates | Remove obvious duplicate jobs. |
-| Matching | `match_records` | Unique jobs plus profile/rules | Scored jobs | Add match score, reasons, and missing requirements. |
+| Matching | `MatchAnalysisTool` | `JobUnderstandingRecord[]`, prepared `JobRecord[]`, profile | Nested match assessment artifacts | Reuse the stored Basic Gate; LLM supplies semantic fit only, while `scoring.py` owns components, score, and recommendation. |
 | Persistence | `JobRepository` | Scored jobs | SQLite rows | Insert or update by deduplication key. Preserve status and notes. |
 | Service | `JobService` | Repository data | DataFrame / job list | Provide UI-ready job data and update methods. |
 | UI | `app.py` | Services | Streamlit page | Show jobs, run pipelines, edit status/notes, export CSV. |

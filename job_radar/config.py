@@ -11,12 +11,6 @@ import yaml
 
 from job_radar.infra.paths import CONFIG_DIR
 from job_radar.profile.models import UserProfile
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from job_radar.tools.match_analysis.models import MatchingRules
-
-
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 
 
@@ -129,14 +123,4 @@ def load_profile(config_dir: Path = CONFIG_DIR) -> tuple[UserProfile, bool, Path
 
     path, used_example = resolve_config_path("profile", config_dir)
     return UserProfile.model_validate(load_yaml(path)), used_example, path
-
-
-def load_matching_rules(config_dir: Path = CONFIG_DIR) -> tuple[MatchingRules, bool, Path]:
-    """Load matching rules, returning whether the example was used."""
-
-    from job_radar.tools.match_analysis.models import MatchingRules
-
-    path, used_example = resolve_config_path("matching_rules", config_dir)
-    return MatchingRules.model_validate(load_yaml(path)), used_example, path
-
 

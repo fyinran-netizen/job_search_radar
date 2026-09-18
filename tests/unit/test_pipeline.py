@@ -1,4 +1,4 @@
-from job_radar.config import load_matching_rules, load_profile
+from job_radar.config import load_profile
 from job_radar.tools.job_extraction.models import RawJobRecord
 from job_radar.tools.job_extraction.normalization import (
     deduplicate_records,
@@ -6,7 +6,8 @@ from job_radar.tools.job_extraction.normalization import (
     normalize_locations,
 )
 from job_radar.frontend.view_models import group_jobs_by_company
-from job_radar.tools.match_analysis.rule_based import match_records
+from job_radar.tools.match_analysis.models import SemanticMatchAssessment
+from job_radar.tools.match_analysis.scoring import build_final_assessment
 from job_radar.tools.job_extraction.normalization import normalize_records
 from job_radar.tools.job_extraction.validation import validate_records
 from job_radar.tools.job_extraction.backend_gate.location import load_city_catalog
@@ -258,14 +259,19 @@ def test_group_jobs_by_company_returns_company_first_view() -> None:
     assert "company_name" not in grouped[0]["jobs"][0]
 
 
-def test_matcher_outputs_score_and_reasons() -> None:
+def test_match_analysis_scoring_outputs_score_and_reasons() -> None:
     profile, _, _ = load_profile(CONFIG_DIR)
-    rules, _, _ = load_matching_rules(CONFIG_DIR)
     records = sample_raw_records()
     normalized = normalize_records(validate_records(records).valid_records)
     unique = deduplicate_records(normalized).unique_records
 
-    matched = match_records(unique, profile, rules)
+    semantic = SemanticMatchAssessment(
+        role_fit="high",
+        must_have_fit="yes",
+        match_reasons=["role alignment"],
+        confidence="high",
+    )
+    matched = [build_final_assessment(unique[0], None, semantic, profile, unique[0].basic_gate)]
 
     assert matched[0].match_score > 0
     assert matched[0].match_reasons

@@ -64,6 +64,7 @@ def summarize(
 def _semantic_projection(
     assessment: dict[str, Any],
 ) -> dict[str, Any]:
+    assessment = _assessment_payload(assessment)
     return {
         "role_fit": assessment.get("role_fit"),
         "must_have_fit": assessment.get("must_have_fit"),
@@ -78,6 +79,7 @@ def _semantic_projection(
 def _deterministic_context(
     assessments: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    assessments = [_assessment_payload(item) for item in assessments]
     return {
         "recommendation_distribution": _distribution(
             assessments,
@@ -128,6 +130,12 @@ def _score_summary(
         "max": max(scores),
         "average": round(sum(scores) / len(scores)),
     }
+
+
+def _assessment_payload(item: dict[str, Any]) -> dict[str, Any]:
+    """Read the actual nested assessment artifact stored by the tool."""
+    nested = item.get("assessment")
+    return nested if isinstance(nested, dict) else item
 
 
 def _dominant(
