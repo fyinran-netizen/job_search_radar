@@ -1,4 +1,3 @@
-from job_radar.agent.controllers import RuleBasedController
 from job_radar.agent.models import AgentLimits, AgentState
 from job_radar.profile.models import UserProfile
 from job_radar.services.agent_service import AgentService
@@ -13,9 +12,8 @@ from job_radar.services.persistence import JobPersistenceService
 from tests.integration.test_repository import make_job
 
 
-def test_agent_service_runs_injected_rule_controller_and_records_trace() -> None:
+def test_agent_service_runs_deterministic_scheduler_and_records_trace() -> None:
     service = AgentService(
-        controller=RuleBasedController(),
         executor=ToolExecutor([MockWebSearchTool()]),
         limits=AgentLimits(max_rounds=1),
     )
@@ -27,7 +25,9 @@ def test_agent_service_runs_injected_rule_controller_and_records_trace() -> None
         ),
     )
 
-    assert result.state.stop_reason == "deterministic stop condition reached"
+    assert result.state.stop_reason == "max_rounds"
+    assert result.state.round_index == 1
+    assert result.state.round_end_reason == "no_progress"
     assert [entry.selected_action for entry in result.decision_trace] == [
         "web_search",
         "acquire_page",
@@ -35,17 +35,10 @@ def test_agent_service_runs_injected_rule_controller_and_records_trace() -> None
     ]
     assert result.decision_trace[0].available_actions == ["web_search"]
     assert result.decision_trace[0].state_summary["round_index"] == 0
-    assert result.decision_trace[1].state_summary["round_index"] == 1
+    assert result.decision_trace[1].state_summary["round_index"] == 0
 
 
 def test_agent_service_rejects_an_action_that_does_not_change_state(monkeypatch) -> None:
-    class StuckController:
-        def decide(self, context):
-            return type("Action", (), {
-                "action": "web_search",
-                "rationale": "repeat",
-            })()
-
     import job_radar.services.agent_service as agent_service_module
 
     monkeypatch.setattr(
@@ -54,7 +47,6 @@ def test_agent_service_rejects_an_action_that_does_not_change_state(monkeypatch)
         lambda action, state, executor, limits, profile=None: state,
     )
     service = AgentService(
-        controller=StuckController(),  # type: ignore[arg-type]
         executor=ToolExecutor([]),
         limits=AgentLimits(max_rounds=1),
     )
@@ -69,7 +61,6 @@ def test_agent_service_rejects_an_action_that_does_not_change_state(monkeypatch)
 def test_agent_service_pauses_after_action_and_resumes_without_repeating_search(temp_db_path) -> None:
     executor = ToolExecutor([MockWebSearchTool()])
     service = AgentService(
-        controller=RuleBasedController(),
         executor=executor,
         limits=AgentLimits(max_rounds=1),
         checkpoint_path=temp_db_path.with_name("agent-checkpoints.db"),
@@ -83,13 +74,15 @@ def test_agent_service_pauses_after_action_and_resumes_without_repeating_search(
     )
 
     assert paused.interrupted is True
-    assert paused.state.round_index == 1
+    assert paused.state.round_index == 0
     assert [event.tool_name for event in executor.events] == ["web_search"]
     assert service.state_history("pause-and-resume")
 
     resumed = service.resume("pause-and-resume")
 
-    assert resumed.state.stop_reason == "deterministic stop condition reached"
+    assert resumed.state.stop_reason == "max_rounds"
+    assert resumed.state.round_index == 1
+    assert resumed.state.round_end_reason == "no_progress"
     assert [entry.selected_action for entry in resumed.decision_trace] == [
         "web_search", "acquire_page", "stop",
     ]
@@ -100,13 +93,7 @@ def test_graph_persists_final_jobs_and_keeps_checkpoint_db_separate(temp_db_path
     jobs_path = temp_db_path
     checkpoint_path = temp_db_path.with_name("agent-checkpoints.db")
 
-    class StopController:
-        def decide(self, context):
-            from job_radar.agent.actions import AgentAction
-            return AgentAction(action="stop", rationale="complete", stop_reason="complete")
-
     service = AgentService(
-        controller=StopController(),  # type: ignore[arg-type]
         executor=ToolExecutor([]),
         limits=AgentLimits(max_rounds=1),
         checkpoint_path=checkpoint_path,
@@ -115,6 +102,7 @@ def test_graph_persists_final_jobs_and_keeps_checkpoint_db_separate(temp_db_path
     state = AgentState(
         round_index=1,
         prepared_jobs=[make_job()],
+        understood_job_keys=[make_job().deduplication_key],
         match_assessments=[{
             "deduplication_key": make_job().deduplication_key,
             "assessment": {"match_score": 91, "match_reasons": ["Python"]},

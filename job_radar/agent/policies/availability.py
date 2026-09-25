@@ -1,7 +1,8 @@
-"""Hard availability policy for bounded agent actions.
+"""State-driven availability policy for bounded agent actions.
 
 This module answers whether an action has the deterministic inputs and budget
-required to execute.  It deliberately does not encode workflow transitions.
+required to execute.  It does not depend on a previous action or workflow
+transition table.
 """
 
 from __future__ import annotations
@@ -105,7 +106,10 @@ def available_actions(
     *,
     profile: UserProfile | None = None,
 ) -> list[AgentActionName]:
-    """Return the actions that pass hard availability checks."""
+    """Return actions whose current-state hard preconditions are satisfied.
+
+    Availability is derived only from the current state, limits, and profile.
+    """
 
     return [
         name for name in AGENT_ACTION_NAMES
@@ -124,4 +128,14 @@ def _has_stop_evidence(state: AgentState, limits: AgentLimits) -> bool:
         or state.last_search_outcome in (SearchOutcome.ERROR, SearchOutcome.STOPPED_NO_PROGRESS)
         or (not state.search_plan and not state.candidate_sources and not state.acquisition_queue)
         or (not state.acquired_pages and not state.job_detail_pages and not state.prepared_jobs and bool(state.errors))
+        or (
+            len(state.match_assessments) >= limits.soft_result_target
+            and not any(
+                get_executable_count(state, action)
+                for action in (
+                    "acquire_page", "analyze_page", "job_extraction",
+                    "explore_followups", "job_understanding", "match_analysis",
+                )
+            )
+        )
     )

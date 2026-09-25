@@ -1,5 +1,5 @@
 from job_radar.agent.actions import AgentAction, execute_action
-from job_radar.agent.policies.namespace import available_actions
+from job_radar.agent.policies.availability import available_actions
 from job_radar.agent.models import AgentLimits, AgentState
 from tests.doubles.mock_ai_provider import MockAIProvider
 from job_radar.profile.models import UserProfile
@@ -81,6 +81,16 @@ def test_mock_agent_action_sequence_updates_state_and_stops() -> None:
             limits,
             profile=profile,
         )
+        if action_name == "match_analysis":
+            # Direct action tests do not run the graph's post-action round
+            # transition, so model the completed round explicitly here.
+            state = state.model_copy(update={
+                "round_index": 1,
+                "round_step_count": 0,
+                "round_match_result_count": 0,
+                "round_refill_count": 0,
+                "round_end_reason": "target_reached",
+            })
 
     assert [item["selected_action"] for item in decisions] == [
         item[0] for item in selected_actions

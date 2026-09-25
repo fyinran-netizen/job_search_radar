@@ -6,7 +6,7 @@ from job_radar.agent.actions import (
     execute_action,
 )
 from job_radar.agent.policies.availability import action_availability
-from job_radar.agent.policies.namespace import available_actions
+from job_radar.agent.policies.availability import available_actions
 from job_radar.agent.models import AgentLimits, AgentState, SearchOutcome
 from job_radar.tools.base import BaseTool
 from job_radar.tools.executor import ToolExecutor
@@ -66,7 +66,52 @@ def test_action_availability_requires_stage_inputs():
     assert "stop" in available_actions(state, limits)
 
 
-def test_web_search_advances_round_and_selects_sources():
+def test_mixed_backlog_exposes_all_currently_valid_stage_actions() -> None:
+    profile = UserProfile(target_roles=["Example Job"])
+    job = normalize_records(
+        [RawJobRecord(company_name="Example", title="Example Job", location="Sydney")]
+    )[0]
+    understanding = JobUnderstandingRecord(
+        deduplication_key=job.deduplication_key,
+        basic_gate=BasicGateResult(),
+        source="ai",
+    )
+    state = AgentState(
+        search_plan=SearchPlan(queries=["example jobs"]),
+        acquisition_queue=[
+            CandidateSource(url="https://example.test/queued", title="Queued", source_name="Example")
+        ],
+        acquired_pages=[PageDocument(url="https://example.test/acquired", source_name="Example")],
+        job_detail_pages=[
+            AIPageInput(url="https://example.test/detail", title="Example Job", visible_text="description")
+        ],
+        prepared_jobs=[job],
+        understanding_records=[understanding],
+    )
+
+    assert available_actions(state, AgentLimits(), profile=profile) == [
+        "web_search",
+        "acquire_page",
+        "analyze_page",
+        "job_extraction",
+        "job_understanding",
+        "match_analysis",
+    ]
+
+
+def test_availability_has_no_scheduler_context() -> None:
+    state = AgentState(
+        search_plan=SearchPlan(queries=["example jobs"]),
+        acquisition_queue=[
+            CandidateSource(url="https://example.test/queued", title="Queued", source_name="Example")
+        ],
+    )
+    limits = AgentLimits()
+
+    assert available_actions(state, limits) == available_actions(state, limits)
+
+
+def test_web_search_stays_in_round_and_selects_sources():
     state = AgentState(search_plan=SearchPlan(keywords=["graduate jobs"]))
     result = execute_action(
         AgentAction(action="web_search", rationale="Start search"),
@@ -75,7 +120,7 @@ def test_web_search_advances_round_and_selects_sources():
         AgentLimits(),
     )
 
-    assert result.round_index == 1
+    assert result.round_index == 0
     assert len(result.candidate_sources) == 1
     assert len(result.selected_sources) == 1
     assert result.last_search_outcome is SearchOutcome.PROGRESS

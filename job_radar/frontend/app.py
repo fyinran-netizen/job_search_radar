@@ -8,6 +8,8 @@ from pydantic import ValidationError
 import streamlit as st
 
 from job_radar.config import load_profile
+from job_radar.agent.controllers.context import build_scheduling_context
+from job_radar.agent.controllers.scheduler import ACTION_PROFILES
 from job_radar.services.agent_service import (
     AgentService,
     AgentServiceResult,
@@ -87,9 +89,7 @@ def render_app() -> None:
 
     runtime = create_real_agent_runtime()
     agent_service = AgentService(
-        controller=runtime.llm_controller,
         executor=runtime.executor,
-        action_summarizer=runtime.action_summarizer,
         db_path=DEFAULT_DB_PATH,
     )
     job_service = JobService(DEFAULT_DB_PATH)
@@ -104,7 +104,7 @@ def render_app() -> None:
     with st.expander("Testing tools"):
         st.caption("Uses mock tools for development checks only.")
         if st.button("Run mock agent search", icon=":material/bug_report:"):
-            st.info("The agent runtime is configured for the LLMController; use the profile form to run it.")
+            st.info("The agent runtime uses the deterministic scheduler; use the profile form to run it.")
 
     render_checkpoint_debug(agent_service)
     render_jobs(job_service)
@@ -202,7 +202,7 @@ def run_agent_pipeline(agent_service: AgentService, profile: UserProfile) -> Non
     if result.interrupted:
         st.info("工作流已暂停，请在 Checkpoint debugging 区域执行下一个 action。")
     else:
-        st.success("LLM-controller agent search finished.")
+        st.success("Agent search finished.")
 
 
 def render_agent_service_result(result: AgentServiceResult) -> None:
@@ -297,6 +297,7 @@ def render_checkpoint_debug(agent_service: AgentService) -> None:
             st.exception(exc)
             return
         _render_checkpoint_state(viewed_entry)
+        _render_scheduler_frontier(viewed_entry, agent_service)
 
         selected_for_replay = st.selectbox(
             "Replay next action",
@@ -360,6 +361,47 @@ def _render_checkpoint_state(entry: CheckpointHistoryEntry) -> None:
                 st.dataframe({field_name: value}, hide_index=True, width="stretch")
             else:
                 st.info("No data in this checkpoint.")
+
+
+_FRONTIER_ACTIONS = (
+    "acquire_page",
+    "analyze_page",
+    "job_extraction",
+    "explore_followups",
+    "job_understanding",
+    "match_analysis",
+)
+
+
+def _render_scheduler_frontier(entry: CheckpointHistoryEntry, agent_service: AgentService) -> None:
+    """Render compact queue readiness without exposing page or job payloads."""
+
+    if entry.state is None:
+        return
+
+    context = build_scheduling_context(
+        entry.state,
+        agent_service.limits,
+        list(_FRONTIER_ACTIONS),
+    )
+    rows = []
+    for action in _FRONTIER_ACTIONS:
+        backlog = context.specific.backlogs[action]
+        rows.append({
+            "action": action,
+            "pending": backlog.pending,
+            "executable": backlog.executable,
+            "batch_size": backlog.batch_size,
+            "batch_fill_ratio": round(backlog.batch_fill_ratio, 2),
+            # This is the presentation-level queue readiness signal.  It
+            # deliberately does not alter or duplicate backend availability.
+            "available": bool(backlog.executable and entry.state.stop_reason is None),
+            "uses_llm": ACTION_PROFILES[action].uses_llm,
+            "uses_network": ACTION_PROFILES[action].uses_network,
+        })
+
+    st.subheader("Scheduler Frontier")
+    st.dataframe(rows, hide_index=True, width="stretch")
 
 
 def _checkpoint_page_rows(value: list[object]) -> list[dict[str, object]]:
@@ -501,5 +543,3 @@ def _default_graduation_month(value: str) -> str:
 
 if __name__ == "__main__":
     render_app()
-
-

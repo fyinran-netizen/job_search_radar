@@ -12,8 +12,6 @@ from pydantic import BaseModel, Field
 
 from job_radar.agent.actions import execute_action
 from job_radar.agent.action_names import AgentActionName
-from job_radar.agent.controllers import Controller, RuleBasedController
-from job_radar.agent.controllers.llm_controller.outcome_summary import ActionOutcomeSummarizer
 from job_radar.agent.graph import build_agent_graph
 from job_radar.agent.models import AgentLimits, AgentState
 from job_radar.infra.logging import configure_logging, new_run_id
@@ -61,14 +59,12 @@ class CheckpointHistoryEntry(BaseModel):
 
 @dataclass
 class AgentService:
-    controller: Controller
     executor: ToolExecutor
     limits: AgentLimits = field(default_factory=AgentLimits)
     max_steps: int | None = None
     checkpoint_path: Path = DEFAULT_CHECKPOINT_DB_PATH
     db_path: Path = DEFAULT_DB_PATH
     persistence_service: JobPersistenceService | None = None
-    action_summarizer: ActionOutcomeSummarizer | None = None
 
     def __post_init__(self) -> None:
         if self.persistence_service is None:
@@ -149,11 +145,10 @@ class AgentService:
 
     def _build_graph(self, saver: SqliteSaver, *, limits: AgentLimits,
                      pause_after_action: bool = False):
-        return build_agent_graph(controller=self.controller, executor=self.executor, limits=limits,
+        return build_agent_graph(executor=self.executor, limits=limits,
                                  action_runner=execute_action, checkpointer=saver,
                                  pause_after_action=pause_after_action,
-                                 persistence_service=self.persistence_service,
-                                 action_summarizer=self.action_summarizer)
+                                 persistence_service=self.persistence_service)
 
 
 def _result_from_graph(result: dict[str, object], run_id: str, *, checkpoint_id: str | None = None,
@@ -211,10 +206,8 @@ def _state_counts(state: AgentState) -> dict[str, int]:
 def create_rule_based_real_agent_service(*, db_path: Path = DEFAULT_DB_PATH,
                                          limits: AgentLimits | None = None) -> AgentService:
     runtime = create_real_agent_runtime()
-    return AgentService(controller=RuleBasedController(), executor=runtime.executor,
-                        limits=limits or AgentLimits(),
-                        persistence_service=JobPersistenceService(db_path),
-                        action_summarizer=runtime.action_summarizer)
+    return AgentService(executor=runtime.executor, limits=limits or AgentLimits(),
+                        persistence_service=JobPersistenceService(db_path))
 
 
 __all__ = ["AgentService", "AgentServiceResult", "CheckpointHistoryEntry", "DecisionTraceEntry",

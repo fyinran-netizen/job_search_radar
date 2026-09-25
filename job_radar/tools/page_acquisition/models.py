@@ -83,5 +83,10 @@ class ToolEvent(BaseModel):
     tool_name: str
     input_summary: str
     output_summary: str
+    elapsed_ms: float = 0.0
+    llm_calls: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
 
 

@@ -1,10 +1,7 @@
-from job_radar.agent.controllers.base import DecisionContext
-from job_radar.agent.controllers.llm_controller.observation.builder import build_observation
 from job_radar.agent.models import AgentError, AgentLimits, AgentState
 from job_radar.agent.actions import AgentAction, execute_action
 from job_radar.agent.work_manager import get_executable_count, is_followup_executable, take_action_batch
 from job_radar.agent.policies.availability import action_availability
-from job_radar.agent.policies.transition import transition_allowed_actions
 from job_radar.tools.explore_followups.models import ExploreFollowupsInput
 from job_radar.tools.explore_followups.tool import ExploreFollowupsTool
 from job_radar.tools.page_analysis.models import PendingFollowup
@@ -187,14 +184,11 @@ def test_same_parent_url_different_followups_are_consumed_by_item_not_parent() -
     assert result.pending_followups[0].stage == "post_extraction"
 
 
-def test_availability_requires_new_href_and_transitions_are_scoped() -> None:
+def test_availability_requires_new_href() -> None:
     no_links = AgentState(pending_followups=[followup(links=[])])
     with_link = AgentState(pending_followups=[followup(links=[{"url": "https://example.test/jobs/1"}])])
     assert action_availability("explore_followups", no_links, AgentLimits()).available is False
     assert action_availability("explore_followups", with_link, AgentLimits()).available is True
-    assert "explore_followups" in transition_allowed_actions("analyze_page")
-    assert "explore_followups" in transition_allowed_actions("job_extraction")
-    assert transition_allowed_actions("explore_followups") == ["acquire_page", "stop"]
 
 
 def test_followup_executable_semantics_are_shared_by_count_availability_and_batch() -> None:
@@ -234,30 +228,3 @@ def test_checkpoint_state_round_trips_explored_links() -> None:
     restored = AgentState.model_validate(state.model_dump(mode="json"))
     assert restored == state
 
-
-def test_controller_observation_exposes_compact_followup_counts() -> None:
-    state = AgentState(
-        pending_followups=[
-            followup(stage="pre_extraction", links=[{"url": "https://example.test/pre"}], priority=90),
-            followup(stage="post_extraction", links=[]),
-            followup(kind="review_required", links=[{"url": "https://example.test/review"}]),
-        ]
-    )
-    observation = build_observation(
-        DecisionContext(
-            state=state,
-            limits=AgentLimits(),
-            available_actions=["explore_followups"],
-        )
-    )
-
-    assert observation.followups is not None
-    assert observation.followups.navigation_pending_count == 2
-    assert observation.followups.executable_followup_count == 1
-    assert observation.followups.high_priority_executable_count == 1
-    assert observation.followups.pre_extraction_count == 1
-    assert observation.followups.post_extraction_count == 1
-    assert observation.backlogs["explore_followups"].pending_count == 3
-    assert observation.backlogs["explore_followups"].executable_count == 1
-    assert observation.backlogs["explore_followups"].batch_size == 3
-    assert observation.backlogs["explore_followups"].available is True

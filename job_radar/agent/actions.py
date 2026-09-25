@@ -1,4 +1,4 @@
-"""Agent v1 actions, hard preconditions, and stage handlers.
+"""Agent v1 actions, hard preconditions, and action handlers.
 
 This module deliberately does not choose actions.  It provides the bounded
 action vocabulary and the deterministic checks/handlers that a future
@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field, model_validator
 from job_radar.agent.models import AgentError, AgentLimits, AgentState, SearchOutcome
 from job_radar.agent.action_names import AgentActionName
 from job_radar.agent.policies.availability import action_availability
-from job_radar.agent.transitions import stop_with_reason
 from job_radar.profile.models import UserProfile
 from job_radar.tools.executor import ToolExecutor
 from job_radar.tools.job_extraction.tool import JobExtractionInput, JobExtractionOutput
@@ -32,10 +31,10 @@ logger = get_logger(__name__)
 
 
 class AgentAction(BaseModel):
-    """A validated, stage-level action request.
+    """A validated action request.
 
     The action intentionally contains no source URL: collection is a batch
-    stage and its handler selects executable sources from AgentState.
+    action and its handler selects executable sources from AgentState.
     """
 
     action: AgentActionName
@@ -55,6 +54,12 @@ class ActionPreconditionError(ValueError):
     """Raised when a handler is called without its hard inputs."""
 
 
+def _mark_stopped(state: AgentState, reason: str) -> AgentState:
+    """Return a copy of state marked as stopped."""
+
+    return state.model_copy(update={"stop_reason": reason})
+
+
 def execute_action(
     action: AgentAction,
     state: AgentState,
@@ -65,8 +70,8 @@ def execute_action(
 ) -> AgentState:
     """Execute one already-selected action through existing tools.
 
-    This is a dispatch boundary, not an LLM controller.  Each stage owns its
-    batching policy; collection is currently serial by design of this handler.
+    This is a dispatch boundary, not an LLM controller.  Each batched action
+    owns its batching policy; collection is currently serial by design.
     """
 
     availability = action_availability(action.action, state, limits, profile=profile)
@@ -76,7 +81,7 @@ def execute_action(
     state = _increment_action_call_count(state, action.action, limits)
 
     if action.action == "stop":
-        return stop_with_reason(state, action.stop_reason or action.rationale)
+        return _mark_stopped(state, action.stop_reason or action.rationale)
     if action.action == "build_search_plan":
         return _run_build_search_plan(state, executor, limits, profile)
     if action.action == "web_search":
@@ -101,12 +106,24 @@ def _increment_action_call_count(
 ) -> AgentState:
     """Record one real execution for actions with configured call limits."""
 
-    if action not in limits.action_call_limits:
-        return state
-    current_action_call_count = state.action_call_counts.get(action, 0)
-    action_call_counts = dict(state.action_call_counts)
-    action_call_counts[action] = current_action_call_count + 1
-    return state.model_copy(update={"action_call_counts": action_call_counts})
+    updates: dict[str, Any] = {}
+    if action in limits.action_call_limits:
+        current_action_call_count = state.action_call_counts.get(action, 0)
+        action_call_counts = dict(state.action_call_counts)
+        action_call_counts[action] = current_action_call_count + 1
+        updates["action_call_counts"] = action_call_counts
+
+    # web_search is ordinary work inside the current processing round.  The
+    # graph advances round_index only after the completed action satisfies a
+    # round-yield condition.
+    updates["round_step_count"] = state.round_step_count + 1
+    if action in {
+        "acquire_page", "analyze_page", "job_extraction",
+        "explore_followups", "job_understanding",
+    }:
+        updates["round_refill_count"] = state.round_refill_count + 1
+
+    return state.model_copy(update=updates)
 
 
 def _run_web_search(state: AgentState, executor: ToolExecutor, limits: AgentLimits) -> AgentState:
@@ -133,12 +150,12 @@ def _run_web_search(state: AgentState, executor: ToolExecutor, limits: AgentLimi
         max_sources=limits.max_sources_per_round,
     )
     logger.info(
-        "search_round round_index=%s queries=%s executed_queries=%s new_urls=%s queue_size_after_enqueue=%s accepted_pages=%s stop_reason=%s",
-        state.round_index, state.search_plan.queries, queries,
-        admission.enqueued_count, admission.queue_size_after_enqueue, 0, None,
+        "search_round round_index=%s round_end_reason=%s stop_reason=%s queries=%s executed_queries=%s new_urls=%s queue_size_after_enqueue=%s accepted_pages=%s",
+        state.round_index, state.round_end_reason, state.stop_reason,
+        state.search_plan.queries, queries, admission.enqueued_count,
+        admission.queue_size_after_enqueue, 0,
     )
     return state.model_copy(update={
-        "round_index": state.round_index + 1,
         "candidate_sources": all_candidates,
         "acquisition_queue": queue,
         # selected_sources is retained as compatibility/history; the runtime
@@ -282,6 +299,7 @@ def _run_match_analysis(state: AgentState, executor: ToolExecutor, profile: User
     return state.model_copy(update={
         "match_assessments": _merge_by_key(state.match_assessments, result.assessments, lambda item: str(item.get("deduplication_key", ""))),
         "matched_job_keys": _merge_strings(state.matched_job_keys, [record.deduplication_key for record in records]),
+        "round_match_result_count": state.round_match_result_count + len(result.assessments),
         "errors": [*state.errors, *_report_errors("match_analysis", result.report)],
     })
 

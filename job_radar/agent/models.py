@@ -39,6 +39,26 @@ class AgentLimits(BaseModel):
         ge=1,
         description="Maximum accumulated job results retained for a run.",
     )
+    soft_result_target: int = Field(
+        default=8,
+        ge=1,
+        description="Soft target for useful match results; not a hard stop.",
+    )
+    round_result_target: int = Field(
+        default=3,
+        ge=1,
+        description="Incremental match-result target for yielding to the next search round.",
+    )
+    round_step_budget: int = Field(
+        default=8,
+        ge=1,
+        description="Maximum scheduler actions processed within one search round.",
+    )
+    refill_budget: int = Field(
+        default=2,
+        ge=0,
+        description="Maximum upstream refill actions allowed for partial LLM batches per round.",
+    )
     max_steps: int = Field(default=25, ge=1)
     acquire_batch_size: int = Field(default=3, ge=1)
     analyze_batch_size: int = Field(default=3, ge=1)
@@ -87,8 +107,11 @@ class AgentState(BaseModel):
     """Validated data carried between actions in one agent workflow."""
 
     round_index: int = 0
+    round_step_count: int = 0
+    round_match_result_count: int = 0
+    round_refill_count: int = 0
+    round_end_reason: str | None = None
     stop_reason: str | None = None
-    last_action_summary: str | None = None
     action_call_counts: dict[AgentActionName, int] = Field(default_factory=dict)
 
     search_plan: SearchPlan | None = None

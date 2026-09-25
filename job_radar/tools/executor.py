@@ -51,6 +51,7 @@ class ToolExecutor:
                 tool_name=tool_name,
                 input_summary=self._summarize(payload),
                 output_summary=self._summarize(result),
+                elapsed_ms=elapsed_ms,
             )
         )
         logger.info(
@@ -77,5 +78,4 @@ class ToolExecutor:
         if isinstance(value, dict):
             return f"dict[{', '.join(sorted(value.keys()))}]"
         return value.__class__.__name__
-
 

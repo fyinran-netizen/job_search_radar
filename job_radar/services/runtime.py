@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from job_radar.agent.controllers import LLMController
-from job_radar.agent.controllers.llm_controller.outcome_summary import ActionOutcomeSummarizer
 from job_radar.config import load_runtime_settings
 from job_radar.infra.llm.base import AIProvider
 from job_radar.infra.llm.ollama import OllamaProvider
@@ -19,8 +17,6 @@ class AgentRuntime:
     """Resolved, injectable dependencies for one real agent run."""
 
     executor: ToolExecutor
-    llm_controller: LLMController
-    action_summarizer: ActionOutcomeSummarizer
     metadata: dict[str, Any]
 
 
@@ -35,8 +31,6 @@ def create_real_agent_runtime() -> AgentRuntime:
         "extraction_model": settings.extraction.model,
         "understanding_model": settings.understanding.model,
         "match_model": settings.match.model,
-        "controller_model": settings.controller.model,
-        "controller_action_summary_model": settings.controller_action_summary.model,
         "ollama_base_url": settings.ollama_base_url,
     }
     providers: dict[str, AIProvider] = {
@@ -46,8 +40,6 @@ def create_real_agent_runtime() -> AgentRuntime:
             "job_extraction": "extraction_model",
             "job_understanding": "understanding_model",
             "match_analysis": "match_model",
-            "controller": "controller_model",
-            "controller_action_summary": "controller_action_summary_model",
         }.items()
     }
     if not all(provider.is_available() for provider in providers.values()):
@@ -58,14 +50,6 @@ def create_real_agent_runtime() -> AgentRuntime:
             job_extraction_provider=providers["job_extraction"],
             job_understanding_provider=providers["job_understanding"],
             match_analysis_provider=providers["match_analysis"],
-        ),
-        llm_controller=LLMController(
-            provider=providers["controller"],
-            timeout_seconds=settings.controller.timeout_seconds,
-        ),
-        action_summarizer=ActionOutcomeSummarizer(
-            provider=providers["controller_action_summary"],
-            timeout_seconds=settings.controller_action_summary.timeout_seconds,
         ),
         metadata=metadata,
     )

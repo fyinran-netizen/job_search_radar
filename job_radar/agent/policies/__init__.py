@@ -3,15 +3,16 @@
 from job_radar.agent.policies.availability import (
     ActionAvailability,
     action_availability,
-    available_actions as hard_available_actions,
+    available_actions,
 )
-from job_radar.agent.policies.namespace import available_actions
-from job_radar.agent.policies.transition import transition_allowed_actions
+
+# Kept as a descriptive compatibility alias for callers that distinguish the
+# raw hard namespace from the public namespace.  They are now the same set.
+hard_available_actions = available_actions
 
 __all__ = [
     "ActionAvailability",
     "action_availability",
     "hard_available_actions",
     "available_actions",
-    "transition_allowed_actions",
 ]
