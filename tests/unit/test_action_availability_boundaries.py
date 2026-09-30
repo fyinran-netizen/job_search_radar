@@ -168,8 +168,8 @@ def test_round_and_result_limits_are_boundary_exclusive_for_their_actions() -> N
     ).available is False
 
     assert action_availability(
-        "build_search_plan", AgentState(round_index=1), AgentLimits(max_rounds=1), profile=PROFILE
-    ).available is False
+        "build_search_plan", AgentState(search_round_count=1), AgentLimits(max_search_rounds=1), profile=PROFILE
+    ).available is True
 
     result_state = AgentState(job_detail_pages=[detail()], prepared_jobs=[job()])
     assert action_availability(

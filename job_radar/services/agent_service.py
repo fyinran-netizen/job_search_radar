@@ -27,6 +27,7 @@ class DecisionTraceEntry(BaseModel):
     available_actions: list[AgentActionName] = Field(default_factory=list)
     selected_action: AgentActionName
     rationale: str
+    action_scores: list[dict[str, Any]] = Field(default_factory=list)
     state_summary: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -51,7 +52,7 @@ class CheckpointHistoryEntry(BaseModel):
     parent_checkpoint_id: str | None = None
     created_at: str | None = None
     next_nodes: list[str] = Field(default_factory=list)
-    round_index: int = 0
+    search_round_count: int = 0
     stop_reason: str | None = None
     state_counts: dict[str, int] = Field(default_factory=dict)
     state: AgentState | None = None
@@ -178,7 +179,7 @@ def _history_entry(snapshot: StateSnapshot, run_id: str, *, include_state: bool 
         parent_checkpoint_id=parent_checkpoint_id,
         created_at=snapshot.created_at,
         next_nodes=list(snapshot.next),
-        round_index=state.round_index,
+        search_round_count=state.search_round_count,
         stop_reason=state.stop_reason,
         state_counts=_state_counts(state),
         state=state if include_state else None,

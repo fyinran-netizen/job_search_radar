@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 from pydantic import ValidationError
 import streamlit as st
 
 from job_radar.config import load_profile
+from job_radar.agent.action_names import AGENT_ACTION_NAMES
 from job_radar.agent.controllers.context import build_scheduling_context
+from job_radar.agent.controllers.features import build_scheduling_features
 from job_radar.agent.controllers.scheduler import ACTION_PROFILES
+from job_radar.agent.controllers.scoring import score_available_actions
+from job_radar.agent.policies.availability import available_actions
 from job_radar.services.agent_service import (
     AgentService,
     AgentServiceResult,
@@ -108,6 +113,7 @@ def render_app() -> None:
 
     render_checkpoint_debug(agent_service)
     render_jobs(job_service)
+    render_scheduler_decision_showcase(agent_service)
 
 
 def render_profile_form(default_profile: UserProfile) -> UserProfile | None:
@@ -206,13 +212,202 @@ def run_agent_pipeline(agent_service: AgentService, profile: UserProfile) -> Non
 
 
 def render_agent_service_result(result: AgentServiceResult) -> None:
-    """Render the agent state and controller trace."""
+    """Render a compact, showcase-oriented view of one completed run."""
 
-    st.write("Final state", result.state.model_dump())
-    st.write(
-        "Decision trace",
-        [entry.model_dump() for entry in result.decision_trace],
+    state = result.state
+    st.divider()
+    st.subheader("Run Summary")
+    _render_run_summary(state)
+
+    st.subheader("Execution Flow")
+    _render_execution_flow(result)
+
+    st.subheader("Final Match Results")
+    _render_match_results(state)
+
+    st.subheader("Pipeline / Funnel Summary")
+    _render_pipeline_funnel(state)
+
+    with st.expander("Technical details"):
+        _render_technical_details(state)
+
+
+def _render_run_summary(state: object) -> None:
+    """Render the small set of metrics useful in a demo or screenshot."""
+
+    metrics = [
+        ("Search rounds", getattr(state, "search_round_count", 0)),
+        ("Candidate sources", len(getattr(state, "candidate_sources", []))),
+        ("Acquired pages", len(getattr(state, "acquired_pages", []))),
+        ("Job detail pages", len(getattr(state, "job_detail_pages", []))),
+        ("Prepared jobs", len(getattr(state, "prepared_jobs", []))),
+        ("Understanding records", len(getattr(state, "understanding_records", []))),
+        ("Match assessments", len(getattr(state, "match_assessments", []))),
+        ("Errors", len(getattr(state, "errors", []))),
+    ]
+    columns = st.columns(4)
+    for index, (label, value) in enumerate(metrics):
+        with columns[index % len(columns)]:
+            st.metric(label, value)
+
+    stop_reason = getattr(state, "stop_reason", None)
+    if stop_reason:
+        st.info(f"**Stop reason:** {_readable_stop_reason(stop_reason)}")
+    else:
+        st.caption("Stop reason: run is still in progress or paused at a checkpoint.")
+
+
+def _render_execution_flow(result: AgentServiceResult) -> None:
+    """Show the actual selected action sequence, including dynamic branches."""
+
+    if not result.decision_trace:
+        st.info("No actions have been recorded yet.")
+        return
+
+    for index, entry in enumerate(result.decision_trace, start=1):
+        action = entry.selected_action.replace("_", " ").title()
+        rationale = entry.rationale.strip()
+        marker = "●" if index == len(result.decision_trace) else "○"
+        st.markdown(f"**{marker} {index}. {action}**")
+        if rationale:
+            st.caption(rationale)
+        if index < len(result.decision_trace):
+            st.markdown("<div style='border-left: 2px solid #d9d9d9; height: 12px; margin-left: 7px;'></div>", unsafe_allow_html=True)
+
+
+def _render_match_results(state: object) -> None:
+    """Render readable job cards from persisted prepared jobs and assessments."""
+
+    jobs_by_key = {
+        job.deduplication_key: job
+        for job in getattr(state, "prepared_jobs", [])
+        if getattr(job, "deduplication_key", None)
+    }
+    assessments = getattr(state, "match_assessments", [])
+    if not assessments:
+        st.info("No final match assessments were produced in this run.")
+        return
+
+    for item in assessments:
+        assessment = item.get("assessment", {}) if isinstance(item, dict) else {}
+        key = item.get("deduplication_key") if isinstance(item, dict) else None
+        job = jobs_by_key.get(key)
+        title = (getattr(job, "title", None) if job else None) or item.get("title", "Untitled role")
+        company = (getattr(job, "company_name", None) if job else None) or item.get("company_name", "Unknown company")
+        score = assessment.get("match_score")
+        recommendation = assessment.get("recommendation")
+        reasons = assessment.get("match_reasons") or assessment.get("deterministic_reasons") or []
+        apply_url = (getattr(job, "apply_url", None) if job else None) or (getattr(job, "source_url", None) if job else None)
+
+        with st.container(border=True):
+            header, score_column = st.columns([4, 1])
+            with header:
+                st.markdown(f"### {title}")
+                st.caption(company)
+            with score_column:
+                st.metric("Match score", f"{score}/100" if score is not None else "—")
+            if recommendation:
+                st.markdown(f"**Recommendation:** {_readable_recommendation(recommendation)}")
+            if reasons:
+                st.markdown("**Why it matches**")
+                for reason in reasons[:4]:
+                    st.markdown(f"- {reason}")
+            if apply_url:
+                st.link_button("Open application / source", apply_url)
+
+
+def _render_pipeline_funnel(state: object) -> None:
+    stages = [
+        ("Candidate sources", len(getattr(state, "candidate_sources", []))),
+        ("Acquired pages", len(getattr(state, "acquired_pages", []))),
+        ("Job detail pages", len(getattr(state, "job_detail_pages", []))),
+        ("Prepared jobs", len(getattr(state, "prepared_jobs", []))),
+        ("Understanding records", len(getattr(state, "understanding_records", []))),
+        ("Final matches", len(getattr(state, "match_assessments", []))),
+    ]
+    columns = st.columns(len(stages))
+    for index, (label, value) in enumerate(stages):
+        with columns[index]:
+            st.metric(label, value)
+            if index < len(stages) - 1:
+                st.caption("→")
+
+
+def _render_technical_details(state: object) -> None:
+    fields = (
+        "selected_sources", "acquired_pages", "job_detail_pages",
+        "page_analysis_traces", "prepared_jobs", "understanding_records",
     )
+    for field_name in fields:
+        value = getattr(state, field_name, [])
+        with st.expander(field_name.replace("_", " ").title()):
+            _render_debug_value(value, field_name)
+
+    with st.expander("Match assessments and errors"):
+        _render_debug_value(getattr(state, "match_assessments", []), "match_assessments")
+        errors = getattr(state, "errors", [])
+        if errors:
+            st.markdown("**Errors**")
+            _render_debug_value(errors, "errors")
+
+
+def _render_debug_value(value: object, field_name: str) -> None:
+    """Render diagnostics compactly while keeping large payloads out of the main view."""
+
+    if not value:
+        st.caption("No data")
+        return
+    if field_name in {"acquired_pages", "job_detail_pages"}:
+        rows = _checkpoint_page_rows(value)
+        if rows:
+            st.dataframe(rows, hide_index=True, width="stretch")
+        return
+    if isinstance(value, list) and hasattr(value[0], "model_dump"):
+        st.dataframe(_compact_rows([item.model_dump(mode="json") for item in value]), hide_index=True, width="stretch")
+    elif isinstance(value, list) and isinstance(value[0], dict):
+        st.dataframe(_compact_rows(value), hide_index=True, width="stretch")
+    else:
+        st.json(_json_value(value))
+
+
+def _readable_stop_reason(value: str) -> str:
+    labels = {
+        "max_results": "the hard result cap was reached",
+        "max_steps": "the execution safety budget was exhausted",
+        "no_progress": "no productive work remained",
+        "frontier_exhausted": "the available work frontier was exhausted",
+        "max_search_rounds": "the search-round expansion limit was reached",
+        "max_rounds": "the search-round expansion limit was reached",
+    }
+    return labels.get(value, value.replace("_", " "))
+
+
+def _readable_recommendation(value: str) -> str:
+    return {
+        "apply": "Apply",
+        "consider": "Consider",
+        "low_priority": "Low priority",
+        "skip": "Skip",
+    }.get(value, value.replace("_", " ").title())
+
+
+def _compact_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Drop columns that contain no useful value across a debug table."""
+
+    if not rows:
+        return rows
+    columns = [key for key in rows[0] if any(row.get(key) not in (None, "", [], {}) for row in rows)]
+    return [{key: row.get(key) for key in columns} for row in rows]
+
+
+def _showcase_display_value(value: object) -> str:
+    """Make generic showcase key/value cells safe for Streamlit Arrow tables."""
+
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list, tuple, set)):
+        return json.dumps(value, ensure_ascii=False, default=str)
+    return str(value)
 
 
 def render_checkpoint_debug(agent_service: AgentService) -> None:
@@ -265,7 +460,7 @@ def render_checkpoint_debug(agent_service: AgentService) -> None:
         latest_entry = history[0]
         st.caption(f"checkpoint_id: `{latest_entry.checkpoint_id or '(none)'}`")
         st.write("Checkpoint summary", {
-            "round_index": latest_entry.round_index,
+            "search_round_count": latest_entry.search_round_count,
             "stop_reason": latest_entry.stop_reason,
             "counts": latest_entry.state_counts,
         })
@@ -333,7 +528,7 @@ def _render_checkpoint_state(entry: CheckpointHistoryEntry) -> None:
         return
     st.caption(f"Viewing checkpoint `{entry.checkpoint_id}` from {entry.created_at or 'unknown time'}")
     st.json({
-        "round_index": state.round_index,
+        "search_round_count": state.search_round_count,
         "stop_reason": state.stop_reason,
         "last_search_outcome": state.last_search_outcome
     })
@@ -392,7 +587,7 @@ def _render_scheduler_frontier(entry: CheckpointHistoryEntry, agent_service: Age
             "pending": backlog.pending,
             "executable": backlog.executable,
             "batch_size": backlog.batch_size,
-            "batch_fill_ratio": round(backlog.batch_fill_ratio, 2),
+            "backlog_to_batch_ratio": round(backlog.batch_fill_ratio, 2),
             # This is the presentation-level queue readiness signal.  It
             # deliberately does not alter or duplicate backend availability.
             "available": bool(backlog.executable and entry.state.stop_reason is None),
@@ -430,10 +625,10 @@ def _checkpoint_page_rows(value: list[object]) -> list[dict[str, object]]:
 
 
 def _agent_state_summary(state: object) -> dict[str, object]:
-    if not hasattr(state, "round_index"):
+    if not hasattr(state, "search_round_count"):
         return {}
     return {
-        "round_index": state.round_index,
+        "search_round_count": state.search_round_count,
         "stop_reason": state.stop_reason,
         "counts": {
             field_name: len(getattr(state, field_name))
@@ -507,6 +702,211 @@ def render_jobs(job_service: JobService) -> None:
         mime="text/csv",
         icon=":material/download:",
     )
+
+
+def render_scheduler_decision_showcase(agent_service: AgentService) -> None:
+    """Render an end-of-page, screenshot-friendly scheduler decision audit."""
+
+    with st.expander("Scheduler Decision Showcase", expanded=False):
+        run_id = st.session_state.get("agent_run_id")
+        if not isinstance(run_id, str) or not run_id:
+            st.info("Load a run to inspect its scheduler decision.")
+            return
+
+        try:
+            history = agent_service.state_history(run_id)
+        except Exception as exc:
+            st.error("Unable to load scheduler checkpoint data.")
+            st.exception(exc)
+            return
+        if not history:
+            st.info("No checkpoints are available for this run.")
+            return
+
+        checkpoint_id = st.session_state.get("view_checkpoint") or history[0].checkpoint_id
+        if checkpoint_id not in {item.checkpoint_id for item in history}:
+            checkpoint_id = history[0].checkpoint_id
+        try:
+            entry = agent_service.checkpoint_detail(run_id, checkpoint_id)
+        except Exception as exc:
+            st.error("Unable to load the selected scheduler checkpoint.")
+            st.exception(exc)
+            return
+        if entry.state is None:
+            st.info("The selected checkpoint has no state payload.")
+            return
+
+        trace_entry, trace_index = _showcase_trace_entry(run_id, entry)
+        available = list(trace_entry.available_actions) if trace_entry else available_actions(entry.state, agent_service.limits)
+        context = build_scheduling_context(entry.state, agent_service.limits, available)
+        frontier_context = build_scheduling_context(entry.state, agent_service.limits, list(AGENT_ACTION_NAMES))
+        features = build_scheduling_features(entry.state, agent_service.limits, context)
+        computed_scores = score_available_actions(context, features)
+        score_rows = _showcase_score_rows(trace_entry, computed_scores)
+        score_by_action = {row["action"]: row["total"] for row in score_rows}
+        selected_action = trace_entry.selected_action if trace_entry else None
+
+        st.caption(f"Run `{run_id}` · checkpoint `{entry.checkpoint_id}`")
+        _render_showcase_frontier(frontier_context, score_by_action, selected_action, entry.state, available)
+        _render_showcase_decision_summary(
+            entry,
+            context,
+            features,
+            selected_action,
+            score_by_action.get(selected_action) if selected_action else None,
+        )
+        _render_showcase_score_breakdown(score_rows, selected_action)
+        _render_showcase_features(features)
+        _render_showcase_transition(agent_service, history, entry, trace_index, trace_entry)
+
+
+def _render_showcase_frontier(context, score_by_action, selected_action, state, available) -> None:
+    rows = []
+    for action in AGENT_ACTION_NAMES:
+        backlog = context.specific.backlogs.get(action)
+        executable = backlog.executable if backlog else 0
+        batch_size = backlog.batch_size if backlog else 0
+        ratio = executable / batch_size if batch_size else 0.0
+        profile = ACTION_PROFILES[action]
+        rows.append({
+            "action": action,
+            "pending": backlog.pending if backlog else 0,
+            "executable": executable,
+            "batch_size": batch_size,
+            "backlog_to_batch_ratio": round(ratio, 2),
+            "available": action in available,
+            "uses_llm": profile.uses_llm,
+            "uses_network": profile.uses_network,
+            "action_score": score_by_action.get(action),
+            "selected": action == selected_action,
+        })
+    st.markdown("**1. Scheduler Frontier**")
+    st.dataframe(rows, hide_index=True, width="stretch")
+
+
+def _render_showcase_decision_summary(entry, context, features, selected_action, selected_score) -> None:
+    goal = features.goal
+    values = [
+        ("search_round_count", entry.state.search_round_count),
+        ("execution_step_count", entry.state.execution_step_count),
+        ("selected_action", selected_action or "—"),
+        ("selected_score", selected_score if selected_score is not None else "—"),
+        ("stop_reason", _readable_stop_reason(entry.state.stop_reason) if entry.state.stop_reason else "—"),
+        ("remaining_search_rounds", context.common.budget.search_rounds_remaining),
+        ("result_count", goal.total_match_assessments),
+        ("result_deficit", goal.result_deficit),
+    ]
+    st.markdown("**2. Selected Decision Summary**")
+    columns = st.columns(4)
+    for index, (label, value) in enumerate(values):
+        with columns[index % len(columns)]:
+            st.metric(label.replace("_", " ").title(), value)
+
+
+def _showcase_score_rows(trace_entry, computed_scores):
+    """Prefer recorded trace values, falling back to the deterministic projection."""
+
+    if trace_entry and trace_entry.action_scores:
+        rows = []
+        for item in trace_entry.action_scores:
+            components = item.get("components", {})
+            if components:
+                for component, value in components.items():
+                    rows.append({"action": item.get("action"), "total": item.get("total"), "component": component, "value": value})
+            else:
+                rows.append({"action": item.get("action"), "total": item.get("total"), "component": "(none)", "value": 0})
+        return rows
+    rows = []
+    for score in computed_scores:
+        if score.components:
+            for component, value in score.components.items():
+                rows.append({"action": score.action, "total": score.total, "component": component, "value": value})
+        else:
+            rows.append({"action": score.action, "total": score.total, "component": "(none)", "value": 0})
+    return rows
+
+
+def _render_showcase_score_breakdown(score_rows, selected_action) -> None:
+    st.markdown("**3. Score Breakdown**")
+    if not score_rows:
+        st.caption("No score trace is available for this checkpoint.")
+        return
+    rows = [dict(row, selected=row["action"] == selected_action) for row in score_rows]
+    st.dataframe(rows, hide_index=True, width="stretch")
+
+
+def _render_showcase_features(features) -> None:
+    st.markdown("**4. Key Scheduling Signals**")
+    rows = []
+    for section, values in features.model_dump(mode="json").items():
+        _flatten_showcase_values(section, values, rows)
+    if rows:
+        for row in rows:
+            row["value"] = _showcase_display_value(row.get("value"))
+        st.dataframe(rows, hide_index=True, width="stretch")
+    else:
+        st.caption("No scheduling features are available.")
+
+
+def _flatten_showcase_values(prefix, value, rows) -> None:
+    if value is None or value == {} or value == []:
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _flatten_showcase_values(f"{prefix}.{key}", item, rows)
+        return
+    if isinstance(value, list):
+        value = ", ".join(str(item) for item in value)
+    rows.append({"signal": prefix, "value": value})
+
+
+def _render_showcase_transition(agent_service, history, entry, trace_index, trace_entry) -> None:
+    st.markdown("**5. Decision / State Transition**")
+    previous_action = None
+    if trace_index is not None and trace_index > 0:
+        result = st.session_state.get("agent_service_result")
+        if isinstance(result, AgentServiceResult):
+            previous_action = result.decision_trace[trace_index - 1].selected_action
+    rows = [
+        {"field": "previous_action", "value": previous_action or "—"},
+        {"field": "selected_action", "value": trace_entry.selected_action if trace_entry else "—"},
+        {"field": "next_node", "value": ", ".join(entry.next_nodes) if entry.next_nodes else "(complete)"},
+        {"field": "search_round_count", "value": entry.state.search_round_count},
+    ]
+    parent_id = entry.parent_checkpoint_id
+    if parent_id:
+        try:
+            parent = agent_service.checkpoint_detail(entry.run_id, parent_id)
+        except Exception:
+            parent = None
+        if parent and parent.state:
+            rows.append({"field": "search_round_count_before", "value": parent.state.search_round_count})
+            for field_name in ("candidate_sources", "acquired_pages", "job_detail_pages", "prepared_jobs", "understanding_records", "match_assessments", "errors"):
+                before = len(getattr(parent.state, field_name))
+                after = len(getattr(entry.state, field_name))
+                if before != after:
+                    rows.append({"field": f"{field_name}_delta", "value": after - before})
+    for row in rows:
+        row["value"] = _showcase_display_value(row.get("value"))
+    st.dataframe(rows, hide_index=True, width="stretch")
+
+
+def _showcase_trace_entry(run_id, entry):
+    result = st.session_state.get("agent_service_result")
+    if not isinstance(result, AgentServiceResult) or result.run_id != run_id or not result.decision_trace:
+        return None, None
+    if result.state == entry.state:
+        return result.decision_trace[-1], len(result.decision_trace) - 1
+    target_round = entry.state.search_round_count
+    candidates = [
+        (index, item)
+        for index, item in enumerate(result.decision_trace)
+        if item.state_summary.get("search_round_count") == target_round
+    ]
+    if candidates:
+        index, item = candidates[-1]
+        return item, index
+    return None, None
 
 
 def _split_items(value: str) -> list[str]:

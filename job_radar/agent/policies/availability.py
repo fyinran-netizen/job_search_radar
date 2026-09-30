@@ -44,15 +44,13 @@ def action_availability(
     if action == "web_search":
         if state.search_plan is None:
             reasons.append("search_plan is missing")
-        if state.round_index >= limits.max_rounds:
-            reasons.append("max_rounds reached")
+        if state.search_round_count >= limits.max_search_rounds:
+            reasons.append("max_search_rounds reached")
         if state.search_plan is not None and not _plan_has_unexecuted_queries(state):
             reasons.append("all search-plan queries are already executed")
     elif action == "build_search_plan":
         if profile is None:
             reasons.append("profile is required by build_search_plan")
-        if state.round_index >= limits.max_rounds:
-            reasons.append("max_rounds reached")
         if state.search_plan is not None and _plan_has_unexecuted_queries(state):
             reasons.append("current search plan is still active")
         if state.last_search_outcome is SearchOutcome.ERROR:
@@ -123,8 +121,7 @@ def _plan_has_unexecuted_queries(state: AgentState) -> bool:
 
 def _has_stop_evidence(state: AgentState, limits: AgentLimits) -> bool:
     return (
-        state.round_index >= limits.max_rounds
-        or len(state.prepared_jobs) >= limits.max_results
+        len(state.prepared_jobs) >= limits.max_results
         or state.last_search_outcome in (SearchOutcome.ERROR, SearchOutcome.STOPPED_NO_PROGRESS)
         or (not state.search_plan and not state.candidate_sources and not state.acquisition_queue)
         or (not state.acquired_pages and not state.job_detail_pages and not state.prepared_jobs and bool(state.errors))
@@ -138,4 +135,23 @@ def _has_stop_evidence(state: AgentState, limits: AgentLimits) -> bool:
                 )
             )
         )
+        or _no_productive_path(state, limits)
     )
+
+
+def _no_productive_path(state: AgentState, limits: AgentLimits) -> bool:
+    productive = any(
+        get_executable_count(state, action)
+        for action in (
+            "acquire_page", "analyze_page", "job_extraction",
+            "explore_followups", "job_understanding", "match_analysis",
+        )
+    )
+    if productive:
+        return False
+    if state.search_round_count < limits.max_search_rounds:
+        if state.search_plan and _plan_has_unexecuted_queries(state):
+            return False
+        if state.search_plan is None and not state.errors:
+            return False
+    return True

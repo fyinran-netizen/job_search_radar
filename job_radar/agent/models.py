@@ -17,7 +17,7 @@ from job_radar.tools.web_search.models import CandidateSource, SearchPlan
 class AgentLimits(BaseModel):
     """Small, explicit limits that keep agent runs bounded."""
 
-    max_rounds: int = Field(
+    max_search_rounds: int = Field(
         default=3,
         ge=1,
         description="Maximum number of search rounds in one run.",
@@ -44,20 +44,10 @@ class AgentLimits(BaseModel):
         ge=1,
         description="Soft target for useful match results; not a hard stop.",
     )
-    round_result_target: int = Field(
-        default=3,
-        ge=1,
-        description="Incremental match-result target for yielding to the next search round.",
-    )
-    round_step_budget: int = Field(
-        default=8,
-        ge=1,
-        description="Maximum scheduler actions processed within one search round.",
-    )
     refill_budget: int = Field(
         default=2,
         ge=0,
-        description="Maximum upstream refill actions allowed for partial LLM batches per round.",
+        description="Maximum upstream refill actions allowed for partial LLM batches.",
     )
     max_steps: int = Field(default=25, ge=1)
     acquire_batch_size: int = Field(default=3, ge=1)
@@ -77,6 +67,14 @@ class AgentLimits(BaseModel):
             "match_analysis": 3,
         }
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_round_limit(cls, value: object) -> object:
+        if isinstance(value, dict) and "max_search_rounds" not in value and "max_rounds" in value:
+            value = dict(value)
+            value["max_search_rounds"] = value.pop("max_rounds")
+        return value
 
 
 class SearchOutcome(str, Enum):
@@ -106,11 +104,8 @@ class AgentError(BaseModel):
 class AgentState(BaseModel):
     """Validated data carried between actions in one agent workflow."""
 
-    round_index: int = 0
-    round_step_count: int = 0
-    round_match_result_count: int = 0
-    round_refill_count: int = 0
-    round_end_reason: str | None = None
+    search_round_count: int = 0
+    execution_step_count: int = 0
     stop_reason: str | None = None
     action_call_counts: dict[AgentActionName, int] = Field(default_factory=dict)
 
@@ -149,6 +144,14 @@ class AgentState(BaseModel):
     match_assessments: list[dict[str, Any]] = Field(default_factory=list)
     matched_job_keys: list[str] = Field(default_factory=list)
     errors: list[AgentError] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_search_round_count(cls, value: object) -> object:
+        if isinstance(value, dict) and "search_round_count" not in value and "round_index" in value:
+            value = dict(value)
+            value["search_round_count"] = value.pop("round_index")
+        return value
 
     @model_validator(mode="after")
     def migrate_selected_sources_to_queue(self) -> "AgentState":

@@ -14,6 +14,7 @@ from job_radar.agent.models import AgentLimits, AgentState
 from job_radar.agent.policies.availability import available_actions
 from job_radar.profile.models import UserProfile
 from job_radar.tools.page_acquisition.models import PageDocument
+from job_radar.tools.job_extraction.models import JobRecord
 from job_radar.tools.search_plan.models import SearchPlan
 
 
@@ -50,7 +51,7 @@ def test_scheduler_uses_stop_only_when_available():
 
 def test_outcome_is_structured_and_deterministic():
     before = AgentState()
-    after = before.model_copy(update={"round_index": 1})
+    after = before.model_copy(update={"search_round_count": 1})
     outcome = build_outcome("web_search", before, after)
     assert outcome.action == "web_search"
     assert outcome.status == "no_progress"
@@ -115,7 +116,7 @@ def manual_context(
     return SchedulingContext(
         common=CommonContext(
             budget=SchedulerBudget(
-                rounds_remaining=2,
+                search_rounds_remaining=2,
                 results_remaining=10,
                 soft_result_target=8,
                 soft_scope_reached=soft_scope_reached,
@@ -399,3 +400,25 @@ def test_refill_budget_exhaustion_releases_partial_llm_batch():
         },
     ))
     assert decision.action == "job_understanding"
+
+
+def test_search_round_limit_keeps_existing_frontier_work_schedulable():
+    state = AgentState(
+        search_round_count=1,
+        search_plan=SearchPlan(queries=["jobs"]),
+        acquired_pages=[PageDocument(url="https://example.test/job", source_name="Example")],
+    )
+    assert schedule(context(state, limits=AgentLimits(max_search_rounds=1))).action == "analyze_page"
+
+
+def test_search_round_limit_stops_when_no_productive_frontier_remains():
+    state = AgentState(search_round_count=1, search_plan=SearchPlan(queries=["jobs"]))
+    assert schedule(context(state, limits=AgentLimits(max_search_rounds=1))).action == "stop"
+
+
+def test_hard_result_cap_stops_even_if_search_is_available():
+    state = AgentState(
+        search_plan=SearchPlan(queries=["jobs"]),
+        prepared_jobs=[JobRecord.model_construct(deduplication_key="job-1")],
+    )
+    assert schedule(context(state, limits=AgentLimits(max_results=1))).action == "stop"

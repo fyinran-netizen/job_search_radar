@@ -33,7 +33,7 @@ class SearchPlan(BaseModel):
 
 class SearchStrategyContext(BaseModel):
     profile: UserProfile
-    round_index: int = Field(default=0, ge=0)
+    search_round_count: int = Field(default=0, ge=0)
     previous_queries: list[str] = Field(default_factory=list)
     previous_results: list[dict[str, Any]] = Field(default_factory=list)
     limits: SearchPlanLimits = Field(default_factory=SearchPlanLimits)

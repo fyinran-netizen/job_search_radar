@@ -113,15 +113,7 @@ def _increment_action_call_count(
         action_call_counts[action] = current_action_call_count + 1
         updates["action_call_counts"] = action_call_counts
 
-    # web_search is ordinary work inside the current processing round.  The
-    # graph advances round_index only after the completed action satisfies a
-    # round-yield condition.
-    updates["round_step_count"] = state.round_step_count + 1
-    if action in {
-        "acquire_page", "analyze_page", "job_extraction",
-        "explore_followups", "job_understanding",
-    }:
-        updates["round_refill_count"] = state.round_refill_count + 1
+    updates["execution_step_count"] = state.execution_step_count + 1
 
     return state.model_copy(update=updates)
 
@@ -150,12 +142,13 @@ def _run_web_search(state: AgentState, executor: ToolExecutor, limits: AgentLimi
         max_sources=limits.max_sources_per_round,
     )
     logger.info(
-        "search_round round_index=%s round_end_reason=%s stop_reason=%s queries=%s executed_queries=%s new_urls=%s queue_size_after_enqueue=%s accepted_pages=%s",
-        state.round_index, state.round_end_reason, state.stop_reason,
+        "search_round search_round_count=%s stop_reason=%s queries=%s executed_queries=%s new_urls=%s queue_size_after_enqueue=%s accepted_pages=%s",
+        state.search_round_count + 1, state.stop_reason,
         state.search_plan.queries, queries, admission.enqueued_count,
         admission.queue_size_after_enqueue, 0,
     )
     return state.model_copy(update={
+        "search_round_count": state.search_round_count + 1,
         "candidate_sources": all_candidates,
         "acquisition_queue": queue,
         # selected_sources is retained as compatibility/history; the runtime
@@ -171,7 +164,7 @@ def _run_web_search(state: AgentState, executor: ToolExecutor, limits: AgentLimi
 def _run_build_search_plan(state: AgentState, executor: ToolExecutor, limits: AgentLimits, profile: UserProfile | None) -> AgentState:
     assert profile is not None
     result = executor.run("build_search_plan", SearchPlanToolInput(
-        profile=profile, round_index=state.round_index,
+        profile=profile, search_round_count=state.search_round_count,
         previous_queries=state.query_history,
         previous_results=[item.model_dump() for round_items in state.search_round_results for item in round_items],
         limits={"max_queries": limits.max_queries_per_round},
@@ -299,7 +292,6 @@ def _run_match_analysis(state: AgentState, executor: ToolExecutor, profile: User
     return state.model_copy(update={
         "match_assessments": _merge_by_key(state.match_assessments, result.assessments, lambda item: str(item.get("deduplication_key", ""))),
         "matched_job_keys": _merge_strings(state.matched_job_keys, [record.deduplication_key for record in records]),
-        "round_match_result_count": state.round_match_result_count + len(result.assessments),
         "errors": [*state.errors, *_report_errors("match_analysis", result.report)],
     })
 

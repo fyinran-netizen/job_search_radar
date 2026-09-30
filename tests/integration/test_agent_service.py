@@ -25,17 +25,16 @@ def test_agent_service_runs_deterministic_scheduler_and_records_trace() -> None:
         ),
     )
 
-    assert result.state.stop_reason == "max_rounds"
-    assert result.state.round_index == 1
-    assert result.state.round_end_reason == "no_progress"
+    assert result.state.stop_reason == "no_progress"
+    assert result.state.search_round_count == 1
     assert [entry.selected_action for entry in result.decision_trace] == [
         "web_search",
         "acquire_page",
         "stop",
     ]
     assert result.decision_trace[0].available_actions == ["web_search"]
-    assert result.decision_trace[0].state_summary["round_index"] == 0
-    assert result.decision_trace[1].state_summary["round_index"] == 0
+    assert result.decision_trace[0].state_summary["search_round_count"] == 0
+    assert result.decision_trace[1].state_summary["search_round_count"] == 1
 
 
 def test_agent_service_rejects_an_action_that_does_not_change_state(monkeypatch) -> None:
@@ -74,19 +73,32 @@ def test_agent_service_pauses_after_action_and_resumes_without_repeating_search(
     )
 
     assert paused.interrupted is True
-    assert paused.state.round_index == 0
+    assert paused.state.search_round_count == 1
     assert [event.tool_name for event in executor.events] == ["web_search"]
     assert service.state_history("pause-and-resume")
 
     resumed = service.resume("pause-and-resume")
 
-    assert resumed.state.stop_reason == "max_rounds"
-    assert resumed.state.round_index == 1
-    assert resumed.state.round_end_reason == "no_progress"
+    assert resumed.state.stop_reason == "no_progress"
+    assert resumed.state.search_round_count == 1
     assert [entry.selected_action for entry in resumed.decision_trace] == [
         "web_search", "acquire_page", "stop",
     ]
     assert [event.tool_name for event in executor.events].count("web_search") == 1
+
+
+def test_execution_safety_budget_stops_the_run():
+    service = AgentService(
+        executor=ToolExecutor([MockWebSearchTool()]),
+        limits=AgentLimits(max_search_rounds=3, max_steps=1),
+    )
+    result = service.run(
+        UserProfile(target_roles=["Data Analyst"]),
+        initial_state=AgentState(search_plan=SearchPlan(keywords=["jobs"])),
+    )
+
+    assert result.state.stop_reason == "max_steps"
+    assert result.state.search_round_count == 1
 
 
 def test_graph_persists_final_jobs_and_keeps_checkpoint_db_separate(temp_db_path) -> None:

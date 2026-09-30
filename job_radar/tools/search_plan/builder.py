@@ -11,7 +11,7 @@ class SearchPlanBuilderProtocol(Protocol):
     def build(
         self,
         profile: UserProfile,
-        round_index: int = 0,
+        search_round_count: int = 0,
         previous_queries: list[str] | None = None,
         previous_results: list[dict] | None = None,
         limits: SearchPlanLimits | None = None,
@@ -27,7 +27,7 @@ class SearchPlanBuilder:
     def build(
         self,
         profile: UserProfile,
-        round_index: int = 0,
+        search_round_count: int = 0,
         previous_queries: list[str] | None = None,
         previous_results: list[dict] | None = None,
         limits: SearchPlanLimits | None = None,
@@ -36,7 +36,7 @@ class SearchPlanBuilder:
         previous = {q.casefold().strip() for q in (previous_queries or [])}
         cohort = infer_graduation_cohort(profile.graduation_date)
         cohort_signal = (
-            cohort.search_terms[round_index % len(cohort.search_terms)]
+            cohort.search_terms[search_round_count % len(cohort.search_terms)]
             if cohort else "graduate"
         )
         locations = profile.preferred_locations or ["Australia"]
@@ -44,17 +44,17 @@ class SearchPlanBuilder:
         detail_signals = ["careers apply", "job description requirements", "graduate program"]
         queries: list[str] = []
         for offset, role in enumerate(profile.target_roles or ["graduate"]):
-            location = locations[(round_index + offset) % len(locations)]
-            company_type = company_types[(round_index + offset) % len(company_types)]
-            detail = detail_signals[(round_index + offset) % len(detail_signals)]
+            location = locations[(search_round_count + offset) % len(locations)]
+            company_type = company_types[(search_round_count + offset) % len(company_types)]
+            detail = detail_signals[(search_round_count + offset) % len(detail_signals)]
             query = f'"{role}" {cohort_signal} {location} {company_type} {detail}'
             if query.casefold() not in previous:
                 queries.append(query)
         # A later round changes the detail signal and remains role-led.
         if not queries and profile.target_roles:
-            role = profile.target_roles[round_index % len(profile.target_roles)]
-            location = locations[round_index % len(locations)]
-            queries = [f'"{role}" {cohort_signal} {location} {detail_signals[(round_index + 1) % 3]}']
+            role = profile.target_roles[search_round_count % len(profile.target_roles)]
+            location = locations[search_round_count % len(locations)]
+            queries = [f'"{role}" {cohort_signal} {location} {detail_signals[(search_round_count + 1) % 3]}']
         limit = (limits or SearchPlanLimits()).max_queries
         queries = [q for q in queries if q.casefold() not in previous][:limit]
         return SearchPlan(
@@ -70,6 +70,6 @@ class SearchPlanBuilder:
 
     def build_from_context(self, context: SearchStrategyContext) -> SearchPlan:
         return self.build(
-            context.profile, context.round_index, context.previous_queries,
+            context.profile, context.search_round_count, context.previous_queries,
             context.previous_results, context.limits,
         )

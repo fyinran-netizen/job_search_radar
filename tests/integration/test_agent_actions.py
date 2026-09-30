@@ -111,7 +111,7 @@ def test_availability_has_no_scheduler_context() -> None:
     assert available_actions(state, limits) == available_actions(state, limits)
 
 
-def test_web_search_stays_in_round_and_selects_sources():
+def test_web_search_increments_search_round_and_selects_sources():
     state = AgentState(search_plan=SearchPlan(keywords=["graduate jobs"]))
     result = execute_action(
         AgentAction(action="web_search", rationale="Start search"),
@@ -120,11 +120,24 @@ def test_web_search_stays_in_round_and_selects_sources():
         AgentLimits(),
     )
 
-    assert result.round_index == 0
+    assert result.search_round_count == 1
     assert len(result.candidate_sources) == 1
     assert len(result.selected_sources) == 1
     assert result.last_search_outcome is SearchOutcome.PROGRESS
     assert result.action_call_counts == {}
+
+
+def test_downstream_processing_does_not_increment_search_round():
+    source = CandidateSource(url="https://example.test/job/2", title="Job 2", source_name="Example")
+    state = AgentState(acquisition_queue=[source], search_round_count=2)
+    result = execute_action(
+        AgentAction(action="acquire_page", rationale="Collect queued page"),
+        state,
+        ToolExecutor([RecordingPageTool()]),
+        AgentLimits(max_search_rounds=2),
+    )
+
+    assert result.search_round_count == 2
 
 
 def test_web_search_admits_raw_source_even_when_it_is_only_discovery_history():

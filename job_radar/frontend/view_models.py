@@ -70,7 +70,7 @@ def checkpoint_history_rows(entries: list[CheckpointHistoryEntry]) -> list[dict[
             "parent_checkpoint_id": entry.parent_checkpoint_id or "",
             "created_at": entry.created_at or "",
             "next_nodes": ", ".join(entry.next_nodes) or "(complete)",
-            "round_index": entry.round_index,
+            "search_round_count": entry.search_round_count,
             "stop_reason": entry.stop_reason or "",
             **entry.state_counts,
         }

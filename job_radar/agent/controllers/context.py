@@ -19,15 +19,14 @@ class ActionBacklog(BaseModel):
 
 
 class SchedulerBudget(BaseModel):
-    rounds_remaining: int
+    search_rounds_remaining: int = 0
     results_remaining: int
     soft_result_target: int
     soft_scope_reached: bool
-    round_result_target: int = 3
-    round_match_result_count: int = 0
-    round_steps_remaining: int = 999
+    execution_steps_remaining: int = 999
     refill_budget_remaining: int = 2
     action_calls_remaining: dict[AgentActionName, int] = Field(default_factory=dict)
+
 
 
 class OverallProgress(BaseModel):
@@ -188,14 +187,12 @@ def build_scheduling_context(
     return SchedulingContext(
         common=CommonContext(
             budget=SchedulerBudget(
-                rounds_remaining=max(0, limits.max_rounds - state.round_index),
+                search_rounds_remaining=max(0, limits.max_search_rounds - state.search_round_count),
                 results_remaining=max(0, limits.max_results - len(state.prepared_jobs)),
                 soft_result_target=limits.soft_result_target,
                 soft_scope_reached=len(state.match_assessments) >= limits.soft_result_target,
-                round_result_target=limits.round_result_target,
-                round_match_result_count=state.round_match_result_count,
-                round_steps_remaining=max(0, limits.round_step_budget - state.round_step_count),
-                refill_budget_remaining=max(0, limits.refill_budget - state.round_refill_count),
+                refill_budget_remaining=limits.refill_budget,
+                execution_steps_remaining=max(0, limits.max_steps - state.execution_step_count),
                 action_calls_remaining={
                     action: max(0, limit - state.action_call_counts.get(action, 0))
                     for action, limit in limits.action_call_limits.items()

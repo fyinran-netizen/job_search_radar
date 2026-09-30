@@ -10,8 +10,9 @@ from langgraph.graph import END, START, StateGraph
 from job_radar.agent.actions import AgentAction, execute_action
 from job_radar.agent.action_names import AGENT_ACTION_NAMES, AgentActionName
 from job_radar.agent.controllers.context import ExecutionMetrics, LastActionOutcome, build_scheduling_context
+from job_radar.agent.controllers.features import build_scheduling_features
 from job_radar.agent.controllers.outcome import build_outcome
-from job_radar.agent.controllers.scheduler import schedule
+from job_radar.agent.controllers.scheduler import schedule_with_scores
 from job_radar.agent.models import AgentLimits, AgentState
 from job_radar.agent.policies.availability import available_actions
 from job_radar.infra.logging import get_logger
@@ -51,11 +52,10 @@ def build_agent_graph(*, executor: ToolExecutor, limits: AgentLimits,
         # the declared Pydantic model.
         agent_state = _validated_agent_state(state["agent_state"])
         step = int(state.get("step", 0))
-        if step >= limits.max_steps:
+        if step >= limits.max_steps or agent_state.execution_step_count >= limits.max_steps:
             logger.info(
-                "run_stop round_index=%s round_end_reason=%s stop_reason=%s",
-                agent_state.round_index,
-                agent_state.round_end_reason,
+                "run_stop search_round_count=%s stop_reason=%s",
+                agent_state.search_round_count,
                 "max_steps",
             )
             return {"agent_state": agent_state.model_copy(update={"stop_reason": "max_steps"}),
@@ -69,10 +69,17 @@ def build_agent_graph(*, executor: ToolExecutor, limits: AgentLimits,
             agent_state, limits, available,
             last_outcome=state.get("last_outcome"),
         )
-        action = schedule(context)
+        features = build_scheduling_features(
+            agent_state,
+            limits,
+            context,
+            state.get("last_outcome"),
+        )
+        action, action_scores = schedule_with_scores(context, features)
         trace = [*state.get("decision_trace", [])]
         trace.append({"step": step + 1, "available_actions": list(context.specific.available_actions),
                       "selected_action": action.action, "rationale": action.rationale,
+                      "action_scores": [item.model_dump() for item in action_scores],
                       "state_summary": _state_summary(agent_state)})
         return {"step": step + 1, "current_action": action.action,
                 "current_stop_reason": getattr(action, "stop_reason", None), "decision_trace": trace}
@@ -113,26 +120,10 @@ def build_agent_graph(*, executor: ToolExecutor, limits: AgentLimits,
                 next_state,
                 execution=_execution_metrics(events),
             )
-            next_state = _advance_processing_round(
-                current,
-                next_state,
-                outcome,
-                limits,
-                state.get("profile"),
-            )
-            if next_state.round_index != current.round_index:
-                logger.info(
-                    "round_end round_index=%s round_end_reason=%s next_round_index=%s stop_reason=%s",
-                    current.round_index,
-                    next_state.round_end_reason,
-                    next_state.round_index,
-                    next_state.stop_reason,
-                )
             if name == "stop":
                 logger.info(
-                    "run_stop round_index=%s round_end_reason=%s stop_reason=%s",
-                    next_state.round_index,
-                    next_state.round_end_reason,
+                    "run_stop search_round_count=%s stop_reason=%s",
+                    next_state.search_round_count,
                     next_state.stop_reason,
                 )
             return {"agent_state": next_state, "last_outcome": outcome}
@@ -163,59 +154,9 @@ def _execution_metrics(events: list[object]) -> ExecutionMetrics:
 
 
 def _state_summary(state: AgentState) -> dict[str, object]:
-    return {"round_index": state.round_index, "stop_reason": state.stop_reason,
+    return {"search_round_count": state.search_round_count, "stop_reason": state.stop_reason,
             "candidate_sources": len(state.candidate_sources),
             "acquisition_queue": len(state.acquisition_queue),
             "acquired_pages": len(state.acquired_pages), "job_detail_pages": len(state.job_detail_pages),
             "prepared_jobs": len(state.prepared_jobs), "understanding_records": len(state.understanding_records),
             "match_assessments": len(state.match_assessments), "errors": len(state.errors)}
-
-
-_PRODUCTIVE_ACTIONS: tuple[AgentActionName, ...] = (
-    "acquire_page", "analyze_page", "job_extraction", "explore_followups",
-    "job_understanding", "match_analysis",
-)
-
-
-def _advance_processing_round(
-    before: AgentState,
-    after: AgentState,
-    outcome: LastActionOutcome,
-    limits: AgentLimits,
-    profile: UserProfile | None,
-) -> AgentState:
-    """Close a bounded processing round while preserving unfinished work."""
-
-    if outcome.action == "stop":
-        return after
-
-    reason = _round_end_reason(after, outcome, limits, profile)
-    if reason is None:
-        return after
-
-    return after.model_copy(update={
-        "round_index": after.round_index + 1,
-        "round_step_count": 0,
-        "round_match_result_count": 0,
-        "round_refill_count": 0,
-        "round_end_reason": reason,
-    })
-
-
-def _round_end_reason(
-    state: AgentState,
-    outcome: LastActionOutcome,
-    limits: AgentLimits,
-    profile: UserProfile | None,
-) -> str | None:
-    if outcome.status in {"no_progress", "error"}:
-        return "no_progress"
-    if state.round_match_result_count >= limits.round_result_target:
-        return "target_reached"
-    if state.round_step_count >= limits.round_step_budget:
-        return "step_budget_exhausted"
-
-    available = available_actions(state, limits, profile=profile)
-    if not any(action in available for action in _PRODUCTIVE_ACTIONS):
-        return "frontier_exhausted"
-    return None
