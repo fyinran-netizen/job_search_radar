@@ -1,71 +1,268 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="4500" height="3800" viewBox="0 0 4500 3800">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100">
   <defs>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#183B56" flood-opacity="0.10"/></filter>
-    <marker id="arrow-program" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="11" markerHeight="11" orient="auto"><path d="M1 1L11 6L1 11Z" fill="#286F9B"/></marker>
-    <marker id="arrow-artifact" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="11" markerHeight="11" orient="auto"><path d="M1 1L11 6L1 11Z" fill="#65758B"/></marker>
-    <marker id="arrow-agent" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="11" markerHeight="11" orient="auto"><path d="M1 1L11 6L1 11Z" fill="#7C3AED"/></marker>
     <style>
-      .bg{fill:#F4F7FA}.title{font:700 42px Inter,Arial,sans-serif;fill:#183B56}.subtitle{font:400 19px Inter,Arial,sans-serif;fill:#526779}.section-title{font:700 22px Inter,Arial,sans-serif;letter-spacing:1.2px}.node-title{font:700 25px Inter,Arial,sans-serif;fill:#183B56}.node-title-sm{font:700 21px Inter,Arial,sans-serif;fill:#183B56}.body{font:400 18px Inter,Arial,sans-serif;fill:#40566C}.body-sm{font:400 16px Inter,Arial,sans-serif;fill:#40566C}.mono{font:500 16px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#334E68}.chip{font:700 14px Inter,Arial,sans-serif;letter-spacing:.7px}.phase{fill:#FFF;stroke:#D7E0EA;stroke-width:2;rx:24}.data{fill:#EDF7FF;stroke:#4B9ACA;stroke-width:2.5;rx:18}.program{fill:#ECF8F2;stroke:#2A8C6B;stroke-width:2.5;rx:18}.ai{fill:#F5EEFF;stroke:#7C3AED;stroke-width:2.5;rx:18}.summary{fill:#FFF7E8;stroke:#D58A1F;stroke-width:2.5;rx:18}.agent{fill:#F3E8FF;stroke:#7C3AED;stroke-width:3;rx:18}.tool{fill:#FFF0F0;stroke:#C9485B;stroke-width:2.5;rx:18}.persist{fill:#F3F6F9;stroke:#65758B;stroke-width:2.5;stroke-dasharray:10 8;rx:18}.arrow-program{fill:none;stroke:#286F9B;stroke-width:4;marker-end:url(#arrow-program)}.arrow-artifact{fill:none;stroke:#65758B;stroke-width:3;stroke-dasharray:9 8;marker-end:url(#arrow-artifact)}.arrow-agent{fill:none;stroke:#7C3AED;stroke-width:4;marker-end:url(#arrow-agent)}.divider{stroke:#D7E0EA;stroke-width:2}.label-bg{fill:#FFF;stroke:#E3E9EF;stroke-width:1;rx:9}
+      .title { font: 700 34px Arial, sans-serif; fill:#0f1f3d; }
+      .h2 { font: 700 22px Arial, sans-serif; }
+      .h3 { font: 700 18px Arial, sans-serif; }
+      .label { font: 600 15px Arial, sans-serif; fill:#10213f; }
+      .small { font: 13px Arial, sans-serif; fill:#334155; }
+      .tiny { font: 11px Arial, sans-serif; fill:#475569; }
+      .box { rx:14; ry:14; stroke-width:2; }
+      .subbox { rx:10; ry:10; stroke-width:1.5; }
+      .arrow { stroke:#18324f; stroke-width:2.2; fill:none; marker-end:url(#arrow); }
+      .thin { stroke:#18324f; stroke-width:1.6; fill:none; marker-end:url(#arrow); }
     </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 8 3.5, 0 7" fill="#18324f"/>
+    </marker>
   </defs>
-  <rect class="bg" width="4500" height="3800"/>
-  <g id="header">
-    <text class="title" x="110" y="92">Job Search Radar Architecture</text>
-    <text class="subtitle" x="110" y="135">The agent selects bounded actions; program guardrails and the executor control every side effect and pipeline step.</text>
-    <g id="header-control-principle" transform="translate(3655 50)"><rect width="730" height="88" rx="18" fill="#E8F1F8" stroke="#B8CBD9" stroke-width="2"/><text class="node-title-sm" x="28" y="36">Control principle</text><text class="body-sm" x="28" y="64">Agent selects • Guardrails validate • Executor acts</text></g>
+
+  <rect width="1600" height="1100" fill="#ffffff"/>
+  <text x="800" y="48" text-anchor="middle" class="title">Job Search Radar — System Architecture</text>
+
+  <!-- LAYER: External Inputs -->
+  <g id="layer-external-inputs">
+    <rect x="20" y="95" width="210" height="445" class="box" fill="#FFF7ED" stroke="#C88A4A"/>
+    <text x="35" y="125" class="h2" fill="#8A4B16">External Inputs</text>
+
+    <rect x="35" y="150" width="180" height="95" class="subbox" fill="#FDE7D3" stroke="#D99A61"/>
+    <text x="55" y="178" class="h3" fill="#8A4B16">Candidate Profile</text>
+    <text x="55" y="202" class="small">Skills, experience,</text>
+    <text x="55" y="220" class="small">preferences, goals</text>
+
+    <rect x="35" y="265" width="180" height="90" class="subbox" fill="#fff1f2" stroke="#fb7185"/>
+    <text x="55" y="293" class="h3" fill="#be123c">Agent Limits</text>
+    <text x="55" y="317" class="small">Budget, rate limits,</text>
+    <text x="55" y="335" class="small">time, scope</text>
+
+    <rect x="35" y="375" width="180" height="120" class="subbox" fill="#f5f3ff" stroke="#8b5cf6"/>
+    <text x="55" y="403" class="h3" fill="#5b21b6">External Job Sources</text>
+    <text x="55" y="427" class="small">Job boards, company sites,</text>
+    <text x="55" y="445" class="small">career pages, etc.</text>
   </g>
-  <g id="phase-discovery-and-page-processing">
-    <rect class="phase" x="90" y="190" width="4320" height="810" filter="url(#shadow)"/><text class="section-title" x="135" y="235" fill="#286F9B">01  DISCOVERY, COLLECTION &amp; PAGE PROCESSING</text>
-    <g id="node-user-profile" transform="translate(140 285)"><rect class="data" width="500" height="175"/><text class="node-title" x="28" y="45">UserProfile</text><text class="body" x="28" y="81">goals / skills / graduation year</text><text class="body" x="28" y="110">location &amp; role preferences</text><text class="body" x="28" y="139">exclusions / work authorization</text></g>
-    <g id="node-search-plan" transform="translate(785 285)"><rect class="ai" width="500" height="175"/><text class="node-title" x="28" y="45">SearchPlan</text><text class="body" x="28" y="81">queries / companies / sources</text><text class="body" x="28" y="110">role families / location strategy</text><text class="body" x="28" y="139">bounded search budget</text></g>
-    <g id="node-candidate-source" transform="translate(1430 285)"><rect class="data" width="500" height="175"/><text class="node-title" x="28" y="45">CandidateSource[]</text><text class="body" x="28" y="81">official / listing / campus pages</text><text class="body" x="28" y="110">source URL / apply URL</text><text class="body" x="28" y="139">source metadata retained by program</text></g>
-    <g id="node-collect-pages" transform="translate(2075 285)"><rect class="tool" width="500" height="175"/><text class="node-title" x="28" y="45">Collect Pages</text><text class="body" x="28" y="81">fetch pages / follow known links</text><text class="body" x="28" y="110">capture HTML, text and metadata</text><text class="body" x="28" y="139">record bounded ToolEvents</text></g>
-    <g id="node-readable-pages" transform="translate(2720 285)"><rect class="data" width="500" height="175"/><text class="node-title" x="28" y="45">readable_pages</text><text class="body" x="28" y="81">successfully fetched readable pages</text><text class="body" x="28" y="110">not yet cleaned or classified as JD</text><text class="body" x="28" y="139">collection-stage output</text></g>
-    <g id="node-clean-pages" transform="translate(3365 285)"><rect class="program" width="500" height="175"/><text class="node-title" x="28" y="45">Clean Pages</text><text class="body" x="28" y="81">extract main readable content</text><text class="body" x="28" y="110">remove navigation and page noise</text><text class="body" x="28" y="139">preserve source metadata</text></g>
-    <g id="node-cleaned-pages" transform="translate(560 655)"><rect class="data" width="650" height="175"/><text class="node-title" x="28" y="45">cleaned_pages</text><text class="body" x="28" y="81">cleaned visible text + page identity</text><text class="body" x="28" y="110">all cleaned readable pages</text><text class="body" x="28" y="139">not limited to JD pages</text></g>
-    <g id="node-page-jd-classification" transform="translate(1430 655)"><rect class="program" width="720" height="175"/><text class="node-title" x="28" y="45">Page JD Classification</text><text class="body" x="28" y="81">identify job-detail-ready pages</text><text class="body" x="28" y="110">route listing / portal pages to follow-up</text><text class="body" x="28" y="139">reject irrelevant cleaned content</text></g>
-    <g id="node-jd-cleaned-pages" transform="translate(2370 655)"><rect class="data" width="700" height="175"/><text class="node-title" x="28" y="45">jd_cleaned_pages</text><text class="body" x="28" y="81">JD-ready cleaned pages</text><text class="body" x="28" y="110">title + visible_text sent to extraction</text><text class="body" x="28" y="139">URLs stay on the program side</text></g>
-    <g id="node-pending-followups" transform="translate(3290 655)"><rect class="summary" width="820" height="175"/><text class="node-title" x="28" y="45">pending_followups</text><text class="body" x="28" y="81">listing links / detail links / apply portals</text><text class="body" x="28" y="110">retained for bounded fetch_more actions</text><text class="body" x="28" y="139">included in accumulated round artifacts</text></g>
-    <g id="arrows-discovery-fixed-pipeline"><path class="arrow-program" d="M640 372H785"/><path class="arrow-program" d="M1285 372H1430"/><path class="arrow-program" d="M1930 372H2075"/><path class="arrow-program" d="M2575 372H2720"/><path class="arrow-program" d="M3220 372H3365"/><path class="arrow-program" d="M3615 460V555H885V655"/><path class="arrow-program" d="M1210 742H1430"/><path class="arrow-program" d="M2150 742H2370"/></g>
-    <g id="arrows-jd-classification-branches"><path class="arrow-artifact" d="M2150 790H2260V905H3200V742H3290"/></g>
+
+  <!-- LAYER: Interface -->
+  <g id="layer-interface">
+    <rect x="255" y="95" width="1090" height="130" class="box" fill="#eff6ff" stroke="#3b82f6"/>
+    <text x="278" y="125" class="h2" fill="#1d4ed8">1  Interface Layer</text>
+    <text x="790" y="125" class="small">User interfaces and entry points</text>
+
+    <rect x="280" y="145" width="315" height="60" class="subbox" fill="#dbeafe" stroke="#60a5fa"/>
+    <text x="302" y="172" class="h3" fill="#1d4ed8">Streamlit UI</text>
+    <text x="302" y="191" class="small">Interactive web interface</text>
+
+    <rect x="625" y="145" width="315" height="60" class="subbox" fill="#dbeafe" stroke="#60a5fa"/>
+    <text x="647" y="172" class="h3" fill="#1d4ed8">app.py (entry point)</text>
+    <text x="647" y="191" class="small">Application bootstrap and configuration</text>
+
+    <rect x="970" y="145" width="350" height="60" class="subbox" fill="#dbeafe" stroke="#60a5fa"/>
+    <text x="992" y="172" class="h3" fill="#1d4ed8">CLI</text>
+    <text x="992" y="191" class="small">Command-line and alternate execution entry points</text>
   </g>
-  <g id="phase-extraction-and-preparation">
-    <rect class="phase" x="90" y="1040" width="4320" height="390" filter="url(#shadow)"/><text class="section-title" x="135" y="1085" fill="#2A8C6B">02  JOB EXTRACTION &amp; PROGRAM PREPARATION</text>
-    <g id="node-ai-job-extraction" transform="translate(380 1160)"><rect class="ai" width="900" height="190"/><text class="node-title" x="30" y="46">AI Job Extraction</text><text class="body" x="30" y="84">jd_cleaned_pages → raw job fields</text><text class="body" x="30" y="116">title / company / location / description</text><text class="body" x="30" y="148">requirements text / deadline clues</text><text class="chip" x="685" y="48" fill="#7C3AED">STRUCTURED OUTPUT</text></g>
-    <g id="node-program-preparation" transform="translate(1800 1160)"><rect class="program" width="900" height="190"/><text class="node-title" x="30" y="46">Program Preparation</text><text class="body" x="30" y="84">validation / normalization / deduplication</text><text class="body" x="30" y="116">merge source_url / apply_url / official status</text><text class="body" x="30" y="148">reject malformed extraction outputs</text></g>
-    <g id="node-prepared-jobs" transform="translate(3220 1160)"><rect class="data" width="900" height="190"/><text class="node-title" x="30" y="46">prepared_jobs</text><text class="body" x="30" y="84">validated PreparedJobRecord[]</text><text class="body" x="30" y="116">normalized full job content + metadata</text><text class="body" x="30" y="148">input to gating and understanding</text></g>
-    <g id="arrows-extraction-preparation"><path class="arrow-program" d="M2720 830V1105H830V1160"/><path class="arrow-program" d="M1280 1255H1800"/><path class="arrow-program" d="M2700 1255H3220"/></g>
+
+  <!-- LAYER: Service -->
+  <g id="layer-service">
+    <rect x="255" y="245" width="1090" height="125" class="box" fill="#ecfeff" stroke="#06b6d4"/>
+    <text x="278" y="275" class="h2" fill="#0e7490">2  Application / Service Layer</text>
+    <text x="800" y="275" class="small">Application orchestration and interface-facing services</text>
+
+    <rect x="280" y="295" width="500" height="55" class="subbox" fill="#cffafe" stroke="#22d3ee"/>
+    <text x="302" y="320" class="h3" fill="#155e75">services</text>
+    <text x="302" y="339" class="small">Application orchestration, runtime setup, persistence use cases</text>
+
+    <rect x="810" y="295" width="510" height="55" class="subbox" fill="#cffafe" stroke="#22d3ee"/>
+    <text x="832" y="320" class="h3" fill="#155e75">frontend view models</text>
+    <text x="832" y="339" class="small">UI models, formatting, and presentation-facing data</text>
   </g>
-  <g id="phase-understanding-and-matching">
-    <rect class="phase" x="90" y="1470" width="4320" height="760" filter="url(#shadow)"/><text class="section-title" x="135" y="1515" fill="#7C3AED">03  REQUIREMENT UNDERSTANDING &amp; MATCH ANALYSIS</text><text class="subtitle" x="135" y="1553">Every prepared job becomes one JobUnderstandingRecord; matching consumes these records, not PreparedJobRecord alone.</text>
-    <g id="node-basic-gate" transform="translate(150 1650)"><rect class="program" width="690" height="260"/><text class="node-title" x="28" y="45">Basic Gate</text><text class="body" x="28" y="82">Skip obvious non-fits before AI tokens.</text><line class="divider" x1="28" y1="105" x2="662" y2="105"/><text class="body-sm" x="28" y="140">Explicit prepared fields only:</text><text class="body-sm" x="28" y="170">deadline / graduation_years / location</text><text class="body-sm" x="28" y="204">pass → AI understanding</text><text class="body-sm" x="28" y="232">reject → skipped understanding record</text></g>
-    <g id="node-ai-requirement-understanding" transform="translate(1030 1650)"><rect class="ai" width="760" height="260"/><text class="node-title" x="28" y="45">AI Requirement Understanding</text><text class="body" x="28" y="82">PreparedJobRecord → structured job facts</text><line class="divider" x1="28" y1="105" x2="732" y2="105"/><text class="body-sm" x="28" y="140">hard requirements / nice-to-have</text><text class="body-sm" x="28" y="170">eligibility / risks / evidence / confidence</text><text class="body-sm" x="28" y="204">No candidate scoring in this node.</text><text class="chip" x="28" y="238" fill="#7C3AED">PYDANTIC-VALIDATED OUTPUT</text></g>
-    <g id="node-job-understandings" transform="translate(1990 1620)"><rect class="data" width="800" height="320"/><text class="node-title" x="28" y="45">job_understandings</text><text class="body-sm" x="28" y="78">JobUnderstandingRecord[]</text><line class="divider" x1="28" y1="98" x2="772" y2="98"/><text class="mono" x="28" y="135">full job snapshot</text><text class="mono" x="28" y="171">basic_gate</text><text class="mono" x="28" y="207">JobRequirementFacts</text><text class="mono" x="28" y="243">source: ai | skipped_by_basic_gate</text><text class="body-sm" x="28" y="286">One traceable understanding record per prepared job.</text></g>
-    <g id="node-match-user-profile" transform="translate(3040 1590)"><rect class="data" width="1040" height="105"/><text class="node-title-sm" x="28" y="42">Matching input A: UserProfile</text><text class="body-sm" x="28" y="74">candidate goals, capabilities, constraints and preferences</text></g>
-    <g id="node-match-analysis" transform="translate(3040 1760)"><rect class="ai" width="1040" height="250"/><text class="node-title" x="28" y="45">Match Analysis</text><text class="body" x="28" y="82">Input: UserProfile + JobUnderstandingRecord[]</text><text class="body" x="28" y="114">score / recommendation / strengths / gaps</text><line class="divider" x1="28" y1="137" x2="1012" y2="137"/><text class="body-sm" x="28" y="173">Uses the full structured understanding record.</text><text class="body-sm" x="28" y="201">Does not directly consume PreparedJobRecord only.</text><text class="chip" x="28" y="232" fill="#7C3AED">VALIDATED MATCH OUTPUT</text></g>
-    <g id="node-match-assessments" transform="translate(3040 2070)"><rect class="data" width="1040" height="110"/><text class="node-title-sm" x="28" y="42">match_assessments</text><text class="body-sm" x="28" y="74">validated scores / recommendations / evidence / deterministic overrides</text></g>
-    <g id="arrows-understanding-main"><path class="arrow-program" d="M3670 1350V1438H495V1650"/><path class="arrow-program" d="M840 1765H1030"/><path class="arrow-program" d="M1790 1780H1990"/><path class="arrow-program" d="M2790 1780H2930V1885H3040"/><path class="arrow-program" d="M3560 2010V2070"/></g>
-    <g id="arrow-basic-gate-skip"><path class="arrow-artifact" d="M840 1860H930V1990H1870V1870H1990"/><rect class="label-bg" x="1000" y="1968" width="268" height="36"/><text class="body-sm" x="1018" y="1992" fill="#65758B">skipped_by_basic_gate</text></g>
-    <g id="arrow-profile-to-match"><path class="arrow-artifact" d="M3560 1695V1760"/></g>
+
+  <!-- LAYER: Agent Core -->
+  <g id="layer-agent-core">
+    <rect x="255" y="390" width="1090" height="300" class="box" fill="#fff1f2" stroke="#ef4444"/>
+    <text x="278" y="420" class="h2" fill="#dc2626">3  Agent Orchestration Layer</text>
+    <text x="770" y="420" class="small">Core planning, execution, and decision making</text>
+
+    <rect x="275" y="440" width="1050" height="230" rx="16" ry="16" fill="#fff7f7" stroke="#fb7185" stroke-width="1.6" stroke-dasharray="7 6"/>
+    <rect x="295" y="452" width="130" height="34" rx="17" ry="17" fill="#ef4444"/>
+    <text x="360" y="475" text-anchor="middle" class="h3" fill="#ffffff">Agent Core</text>
+
+    <rect x="650" y="455" width="230" height="55" class="subbox" fill="#ede9fe" stroke="#8b5cf6"/>
+    <text x="670" y="482" class="h3" fill="#5b21b6">AgentState</text>
+    <text x="670" y="501" class="small">Validated shared workflow state</text>
+
+    <rect x="1000" y="455" width="240" height="55" class="subbox" fill="#ede9fe" stroke="#8b5cf6"/>
+    <text x="1020" y="482" class="h3" fill="#5b21b6">Graph</text>
+    <text x="1020" y="501" class="small">Execution graph and state transitions</text>
+
+    <rect x="445" y="545" width="200" height="80" class="subbox" fill="#ffe4e6" stroke="#fb7185"/>
+    <text x="465" y="575" class="h3" fill="#be123c">Scheduler</text>
+    <text x="465" y="596" class="small">Scores available actions</text>
+    <text x="465" y="614" class="small">and manages priorities</text>
+
+    <rect x="700" y="545" width="210" height="80" class="subbox" fill="#ffe4e6" stroke="#fb7185"/>
+    <text x="720" y="575" class="h3" fill="#be123c">Controller</text>
+    <text x="720" y="596" class="small">Coordinates execution</text>
+    <text x="720" y="614" class="small">and selects next action</text>
+
+    <rect x="990" y="530" width="250" height="55" class="subbox" fill="#ffe4e6" stroke="#fb7185"/>
+    <text x="1010" y="557" class="h3" fill="#be123c">Policies</text>
+    <text x="1010" y="576" class="small">Availability rules and constraints</text>
+
+    <rect x="990" y="600" width="250" height="55" class="subbox" fill="#ffe4e6" stroke="#fb7185"/>
+    <text x="1010" y="627" class="h3" fill="#be123c">ToolExecutor</text>
+    <text x="1010" y="646" class="small">Executes bounded tool actions</text>
+
+    <rect x="300" y="525" width="110" height="35" class="subbox" fill="#dbeafe" stroke="#60a5fa"/>
+    <text x="355" y="548" text-anchor="middle" class="label">Limits</text>
+    <rect x="300" y="570" width="110" height="35" class="subbox" fill="#dbeafe" stroke="#60a5fa"/>
+    <text x="355" y="593" text-anchor="middle" class="label">Backlog</text>
+    <rect x="300" y="615" width="110" height="35" class="subbox" fill="#dbeafe" stroke="#60a5fa"/>
+    <text x="355" y="638" text-anchor="middle" class="label">Progress</text>
+
+    <path d="M410 542 L445 565" class="thin"/>
+    <path d="M410 587 L445 585" class="thin"/>
+    <path d="M410 632 L445 605" class="thin"/>
+    <path d="M645 585 L700 585" class="arrow"/>
+    <path d="M805 545 L765 510" class="thin"/>
+    <path d="M910 565 L990 557" class="thin"/>
+    <path d="M910 605 L990 627" class="thin"/>
+    <path d="M1000 482 L880 482" class="thin"/>
   </g>
-  <g id="phase-agent-control">
-    <rect class="phase" x="90" y="2270" width="4320" height="1100" filter="url(#shadow)"/><text class="section-title" x="135" y="2315" fill="#7C3AED">04  AGENT CONTROLLER &amp; GUARDED EXECUTION LOOP</text>
-    <g id="node-round-state" transform="translate(140 2410)"><rect class="summary" width="880" height="450"/><text class="node-title" x="32" y="48">Round State / Artifacts</text><text class="body" x="32" y="82">Accumulated structured state for this run</text><line class="divider" x1="32" y1="104" x2="848" y2="104"/><text class="mono" x="32" y="145">SearchPlan</text><text class="mono" x="32" y="181">CandidateSource[]</text><text class="mono" x="32" y="217">PendingFollowups[]</text><text class="mono" x="32" y="253">readable / cleaned / jd_cleaned pages</text><text class="mono" x="32" y="289">prepared_jobs</text><text class="mono" x="450" y="145">job_understandings</text><text class="mono" x="450" y="181">match_assessments</text><text class="mono" x="450" y="217">reports</text><text class="mono" x="450" y="253">limits</text><text class="mono" x="450" y="289">previous queries</text><rect x="32" y="330" width="816" height="78" rx="14" fill="#FFFDF8" stroke="#E4B96C" stroke-width="2"/><text class="body-sm" x="58" y="363">Current run state is the controller's context.</text><text class="body-sm" x="58" y="391">Each completed action appends validated results.</text></g>
-    <g id="node-agent-controller" transform="translate(1160 2450)"><rect class="agent" width="700" height="350"/><text class="node-title" x="30" y="48">Agent Controller</text><text class="body" x="30" y="86">Reads run state and selects the next</text><text class="body" x="30" y="116">bounded tool or pipeline action.</text><line class="divider" x1="30" y1="142" x2="670" y2="142"/><text class="body-sm" x="30" y="181">Chooses strategy + tool based on</text><text class="body-sm" x="30" y="209">coverage, quality, pending work and limits.</text><text class="body-sm" x="30" y="249">Loops until stop or limits are reached.</text><text class="chip" x="30" y="312" fill="#7C3AED">SELECTS ACTION • NO DIRECT EXECUTION</text></g>
-    <g id="node-tool-plan" transform="translate(2020 2395)"><rect class="agent" width="850" height="470"/><text class="node-title" x="28" y="48">ToolPlan</text><text class="body" x="28" y="82">Exactly one proposed bounded action</text><line class="divider" x1="28" y1="104" x2="822" y2="104"/><text class="mono" x="28" y="148">search_more</text><text class="mono" x="28" y="188">fetch_page</text><text class="mono" x="28" y="228">fetch_detail_links</text><text class="mono" x="28" y="268">classify_pages</text><text class="mono" x="28" y="308">extract_jobs</text><text class="mono" x="450" y="148">understand_jobs</text><text class="mono" x="450" y="188">match_jobs</text><text class="mono" x="450" y="228">ask_user</text><text class="mono" x="450" y="268">stop</text><rect x="28" y="348" width="794" height="78" rx="12" fill="#FFF" stroke="#CDB9F6" stroke-width="2"/><text class="body-sm" x="52" y="380">Action + bounded arguments + reason</text><text class="body-sm" x="52" y="406">are returned as a schema-validated plan.</text></g>
-    <g id="node-program-guardrails" transform="translate(3030 2395)"><rect class="program" width="1100" height="470"/><text class="node-title" x="30" y="48">Program Guardrails</text><text class="body" x="30" y="82">Validates ToolPlan before execution</text><line class="divider" x1="30" y1="104" x2="1070" y2="104"/><text class="body-sm" x="30" y="145">• schema valid</text><text class="body-sm" x="30" y="183">• tool is allowlisted</text><text class="body-sm" x="30" y="221">• args are bounded</text><text class="body-sm" x="30" y="259">• URL/source exists in candidate or pending state</text><text class="body-sm" x="30" y="297">• round/query/page/token limits not exceeded</text><text class="body-sm" x="30" y="335">• no user-state mutation</text><rect x="30" y="372" width="1040" height="58" rx="12" fill="#FFF" stroke="#B9DCCA" stroke-width="2"/><text class="body-sm" x="54" y="408">Reject invalid plans safely; only validated plans cross the side-effect boundary.</text></g>
-    <g id="node-tool-executor" transform="translate(500 2980)"><rect class="tool" width="760" height="245"/><text class="node-title" x="30" y="48">ToolExecutor</text><text class="body" x="30" y="86">Executes the allowed action only.</text><line class="divider" x1="30" y1="112" x2="730" y2="112"/><text class="body-sm" x="30" y="151">Uses validated arguments and emits ToolEvents.</text><text class="body-sm" x="30" y="181">Cannot bypass guardrails or mutate user state.</text><text class="chip" x="30" y="218" fill="#C9485B">SIDE-EFFECT BOUNDARY</text></g>
-    <g id="node-fixed-pipeline-step" transform="translate(1530 2980)"><rect class="program" width="900" height="245"/><text class="node-title" x="30" y="48">Fixed Pipeline Step</text><text class="body" x="30" y="86">Runs the selected bounded operation through</text><text class="body" x="30" y="116">existing search, page or job processing code.</text><line class="divider" x1="30" y1="142" x2="870" y2="142"/><text class="body-sm" x="30" y="180">The controller chooses which step runs next;</text><text class="body-sm" x="30" y="208">the step itself remains deterministic or scoped AI.</text></g>
-    <g id="node-updated-artifacts" transform="translate(2700 2940)"><rect class="data" width="1350" height="325"/><text class="node-title" x="30" y="48">Updated Artifacts</text><text class="body" x="30" y="82">Validated execution results return to run state</text><line class="divider" x1="30" y1="104" x2="1320" y2="104"/><text class="mono" x="30" y="145">new CandidateSource[]</text><text class="mono" x="30" y="181">new readable / cleaned / jd_cleaned pages</text><text class="mono" x="30" y="217">new pending_followups</text><text class="mono" x="700" y="145">new prepared_jobs</text><text class="mono" x="700" y="181">new job_understandings</text><text class="mono" x="700" y="217">new match_assessments</text><text class="body-sm" x="30" y="275">Artifacts are merged into Round State, then the controller evaluates the next action.</text></g>
-    <g id="arrows-agent-plan"><path class="arrow-agent" d="M1020 2635H1160"/><path class="arrow-agent" d="M1860 2630H2020"/><path class="arrow-agent" d="M2870 2630H3030"/></g>
-    <g id="arrows-guarded-execution"><path class="arrow-agent" d="M3580 2865V2910H880V2980"/><path class="arrow-program" d="M1260 3102H1530"/><path class="arrow-program" d="M2430 3102H2700"/></g>
-    <g id="updated-artifacts-controller-loop"><path class="arrow-agent" d="M3375 2940V2900H1510V2800"/><rect class="label-bg" x="2110" y="2878" width="405" height="36"/><text class="body-sm" x="2128" y="2902" fill="#7C3AED">updated state → next controller decision</text></g>
-    <g id="artifact-feed-to-round-state"><path class="arrow-artifact" d="M3040 2125H2850V2240H580V2410"/><text class="body-sm" x="1600" y="2218" fill="#65758B">current pipeline outputs enter the first round state</text></g>
+
+  <!-- LAYER: Tools -->
+  <g id="layer-tools">
+    <rect x="165" y="715" width="1180" height="165" class="box" fill="#fffbeb" stroke="#f59e0b"/>
+    <text x="188" y="745" class="h2" fill="#b45309">4  Tool / Capability Layer</text>
+    <text x="650" y="745" class="small">Bounded executable capabilities</text>
+
+    <g id="tool-boxes">
+      <rect x="185" y="775" width="130" height="78" class="subbox" fill="#fef3c7" stroke="#f59e0b"/>
+      <text x="250" y="801" text-anchor="middle" class="label">build_search_plan</text>
+      <text x="250" y="823" text-anchor="middle" class="small">Search Plan</text>
+
+      <rect x="325" y="775" width="120" height="78" class="subbox" fill="#fef3c7" stroke="#f59e0b"/>
+      <text x="385" y="801" text-anchor="middle" class="label">web_search</text>
+      <text x="385" y="823" text-anchor="middle" class="small">Web Search</text>
+
+      <rect x="455" y="775" width="120" height="78" class="subbox" fill="#fef3c7" stroke="#f59e0b"/>
+      <text x="515" y="801" text-anchor="middle" class="label">acquire_page</text>
+      <text x="515" y="823" text-anchor="middle" class="small">Page Acquisition</text>
+
+      <rect x="585" y="775" width="120" height="78" class="subbox" fill="#fef3c7" stroke="#f59e0b"/>
+      <text x="645" y="801" text-anchor="middle" class="label">analyze_page</text>
+      <text x="645" y="823" text-anchor="middle" class="small">Page Analysis</text>
+
+      <rect x="715" y="775" width="135" height="78" class="subbox" fill="#fef3c7" stroke="#f59e0b"/>
+      <text x="782" y="801" text-anchor="middle" class="label">explore_followups</text>
+      <text x="782" y="823" text-anchor="middle" class="small">Follow-up Exploration</text>
+
+      <rect x="860" y="775" width="125" height="78" class="subbox" fill="#fef3c7" stroke="#f59e0b"/>
+      <text x="922" y="801" text-anchor="middle" class="label">job_extraction</text>
+      <text x="922" y="823" text-anchor="middle" class="small">Job Extraction</text>
+
+      <rect x="995" y="775" width="140" height="78" class="subbox" fill="#fef3c7" stroke="#f59e0b"/>
+      <text x="1065" y="801" text-anchor="middle" class="label">job_understanding</text>
+      <text x="1065" y="823" text-anchor="middle" class="small">Job Understanding</text>
+
+      <rect x="1145" y="775" width="170" height="78" class="subbox" fill="#fef3c7" stroke="#f59e0b"/>
+      <text x="1230" y="801" text-anchor="middle" class="label">match_analysis</text>
+      <text x="1230" y="823" text-anchor="middle" class="small">Match Assessment</text>
+    </g>
+
+    <path d="M805 625 L805 715" class="arrow"/>
+    <path d="M1115 655 L1115 715" class="arrow"/>
   </g>
-  <g id="persistence">
-    <g id="node-build-persistable-jobs" transform="translate(180 3510)"><rect class="program" width="1140" height="150"/><text class="node-title-sm" x="30" y="43">Program builds persistable scored jobs</text><text class="body" x="30" y="80">Join validated job snapshots, understandings and match results.</text><text class="chip" x="30" y="119" fill="#2A8C6B">NEXT IMPLEMENTATION SLICE</text></g>
-    <g id="node-sqlite-persistence" transform="translate(1510 3510)"><rect class="persist" width="1060" height="150"/><text class="node-title-sm" x="30" y="43">SQLite Persistence</text><text class="body" x="30" y="80">Persist accepted, validated scored jobs.</text><text class="body-sm" x="30" y="112">Planned persistence adapter; AI match writeback not fully wired yet.</text></g>
-    <g id="legend" transform="translate(2770 3490)"><rect width="1500" height="190" rx="18" fill="#FFF" stroke="#D7E0EA" stroke-width="2"/><text class="node-title-sm" x="28" y="38">Legend</text><rect class="data" x="28" y="58" width="42" height="28"/><text class="body-sm" x="84" y="79">Data artifact</text><rect class="program" x="260" y="58" width="42" height="28"/><text class="body-sm" x="316" y="79">Program</text><rect class="ai" x="468" y="58" width="42" height="28"/><text class="body-sm" x="524" y="79">AI</text><rect class="tool" x="640" y="58" width="42" height="28"/><text class="body-sm" x="696" y="79">Tool / side effect</text><rect class="persist" x="920" y="58" width="42" height="28"/><text class="body-sm" x="976" y="79">Planned adapter</text><path class="arrow-program" d="M28 138H145"/><text class="body-sm" x="165" y="144">Fixed pipeline</text><path class="arrow-artifact" d="M430 138H547"/><text class="body-sm" x="567" y="144">Artifact feed</text><path class="arrow-agent" d="M810 138H927"/><text class="body-sm" x="947" y="144">Validated plan flow</text></g>
-    <g id="persistence-flow"><path class="arrow-artifact" d="M3560 2180H4325V3435H750V3510"/><path class="arrow-program" d="M1320 3585H1510"/></g>
+
+  <!-- LAYER: Infrastructure -->
+  <g id="layer-infrastructure">
+    <rect x="165" y="900" width="1180" height="120" class="box" fill="#f5f3ff" stroke="#8b5cf6"/>
+    <text x="188" y="930" class="h2" fill="#6d28d9">5  Infrastructure / Support Layer</text>
+    <text x="650" y="930" class="small">Shared runtime, storage, LLM, and configuration support</text>
+
+    <rect x="190" y="950" width="250" height="50" class="subbox" fill="#ede9fe" stroke="#8b5cf6"/>
+    <text x="315" y="978" text-anchor="middle" class="label">LLM adapters / prompts</text>
+
+    <rect x="460" y="950" width="250" height="50" class="subbox" fill="#ede9fe" stroke="#8b5cf6"/>
+    <text x="585" y="978" text-anchor="middle" class="label">logging / runtime / paths</text>
+
+    <rect x="730" y="950" width="280" height="50" class="subbox" fill="#ede9fe" stroke="#8b5cf6"/>
+    <text x="870" y="978" text-anchor="middle" class="label">SQLite storage / repositories</text>
+
+    <rect x="1030" y="950" width="290" height="50" class="subbox" fill="#ede9fe" stroke="#8b5cf6"/>
+    <text x="1175" y="978" text-anchor="middle" class="label">config / test profile</text>
+  </g>
+
+  <!-- LAYER: Outputs -->
+  <g id="layer-outputs">
+    <rect x="1370" y="95" width="210" height="660" class="box" fill="#f0fdf4" stroke="#16a34a"/>
+    <text x="1387" y="125" class="h2" fill="#166534">Outputs / Results</text>
+
+    <g class="outputs">
+      <rect x="1390" y="150" width="170" height="70" class="subbox" fill="#dcfce7" stroke="#22c55e"/>
+      <text x="1475" y="178" text-anchor="middle" class="label">Search Plans</text>
+      <text x="1475" y="199" text-anchor="middle" class="tiny">Generated queries</text>
+
+      <rect x="1390" y="235" width="170" height="70" class="subbox" fill="#dcfce7" stroke="#22c55e"/>
+      <text x="1475" y="263" text-anchor="middle" class="label">Candidate Sources</text>
+      <text x="1475" y="284" text-anchor="middle" class="tiny">URLs and source metadata</text>
+
+      <rect x="1390" y="320" width="170" height="70" class="subbox" fill="#dcfce7" stroke="#22c55e"/>
+      <text x="1475" y="348" text-anchor="middle" class="label">Page Documents</text>
+      <text x="1475" y="369" text-anchor="middle" class="tiny">Fetched page content</text>
+
+      <rect x="1390" y="405" width="170" height="70" class="subbox" fill="#dcfce7" stroke="#22c55e"/>
+      <text x="1475" y="433" text-anchor="middle" class="label">Prepared Jobs</text>
+      <text x="1475" y="454" text-anchor="middle" class="tiny">Structured job records</text>
+
+      <rect x="1390" y="490" width="170" height="70" class="subbox" fill="#dcfce7" stroke="#22c55e"/>
+      <text x="1475" y="518" text-anchor="middle" class="label">Understanding Records</text>
+      <text x="1475" y="539" text-anchor="middle" class="tiny">Interpreted requirements</text>
+
+      <rect x="1390" y="575" width="170" height="70" class="subbox" fill="#dcfce7" stroke="#22c55e"/>
+      <text x="1475" y="603" text-anchor="middle" class="label">Match Assessments</text>
+      <text x="1475" y="624" text-anchor="middle" class="tiny">Scores, gaps, risks</text>
+
+      <rect x="1390" y="660" width="170" height="70" class="subbox" fill="#dcfce7" stroke="#22c55e"/>
+      <text x="1475" y="688" text-anchor="middle" class="label">Final Results / Reports</text>
+      <text x="1475" y="709" text-anchor="middle" class="tiny">Consolidated outputs</text>
+    </g>
+  </g>
+
+  <!-- Main connectors -->
+  <g id="connectors">
+    <path d="M230 195 L255 195" class="arrow"/>
+    <path d="M230 310 L255 310" class="arrow"/>
+    <path d="M230 435 L255 435" class="arrow"/>
+
+    <path d="M790 225 L790 245" class="arrow"/>
+    <path d="M790 370 L790 390" class="arrow"/>
+    <path d="M1345 610 L1370 610" class="arrow"/>
+
+  </g>
+
+  <!-- Legend -->
+  <g id="legend">
+    <rect x="20" y="1040" width="1560" height="45" rx="12" ry="12" fill="#f8fafc" stroke="#cbd5e1"/>
+    <text x="40" y="1068" class="h3" fill="#0f172a">Legend</text>
+
+    <rect x="135" y="1054" width="24" height="16" fill="#dbeafe" stroke="#3b82f6"/>
+    <text x="170" y="1068" class="small">Interface</text>
+
+    <rect x="280" y="1054" width="24" height="16" fill="#cffafe" stroke="#06b6d4"/>
+    <text x="315" y="1068" class="small">Service</text>
+
+    <rect x="405" y="1054" width="24" height="16" fill="#ffe4e6" stroke="#ef4444"/>
+    <text x="440" y="1068" class="small">Agent Core</text>
+
+    <rect x="555" y="1054" width="24" height="16" fill="#fef3c7" stroke="#f59e0b"/>
+    <text x="590" y="1068" class="small">Tools</text>
+
+    <rect x="665" y="1054" width="24" height="16" fill="#ede9fe" stroke="#8b5cf6"/>
+    <text x="700" y="1068" class="small">Infrastructure</text>
+
+    <rect x="830" y="1054" width="24" height="16" fill="#fce7f3" stroke="#db2777"/>
+    <text x="865" y="1068" class="small">External Inputs</text>
+
+    <rect x="1010" y="1054" width="24" height="16" fill="#dcfce7" stroke="#22c55e"/>
+    <text x="1045" y="1068" class="small">Outputs</text>
   </g>
 </svg>

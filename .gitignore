@@ -1,28 +1,28 @@
+# Python environments and caches
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
 .test_tmp/
 .local_tmp/
-.agents/*
-!.agents/skills/
-!.agents/skills/**
-.agents/skills/developing-with-streamlit
 .ruff_cache/
-.streamlit/secrets.toml
-.env
+.uv-cache/
 
-data/*.db
-data/*.sqlite
-data/*.xlsx
-data/private_*
-backups/
+# Local configuration and application data
+.env
+.streamlit/secrets.toml
 
 config/profile.yaml
 config/sources.yaml
 config/matching_rules.yaml
+data/*.db
+data/*.sqlite
+data/*.log
+data/*.xlsx
+data/private_*
+backups/
 
+# Development and test artifacts
 .idea/
-/data/
-
+scripts/
 tests/output/
